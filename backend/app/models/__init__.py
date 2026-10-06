@@ -8,6 +8,7 @@ from app.models.audit import AuditLog
 from app.models.subject import Subject
 from app.models.timetable import TimetableSlot
 from app.models.curriculum import CurriculumRequirement
+from app.models.grades import Exam, ExamResult, ReportCard, ReportCardEntry
 
 __all__ = [
     "User",
@@ -22,4 +23,8 @@ __all__ = [
     "Subject",
     "TimetableSlot",
     "CurriculumRequirement",
+    "Exam",
+    "ExamResult",
+    "ReportCard",
+    "ReportCardEntry",
 ]
