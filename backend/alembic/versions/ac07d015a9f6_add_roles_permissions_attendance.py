@@ -45,11 +45,22 @@ def upgrade() -> None:
     with op.batch_alter_table('user', schema=None) as batch_op:
         batch_op.add_column(sa.Column('can_manage_users', sa.Boolean(), nullable=False, server_default=sa.false()))
         batch_op.add_column(sa.Column('teacher_id', sa.Integer(), nullable=True))
-        batch_op.alter_column('role',
-               existing_type=sa.VARCHAR(length=7),
-               type_=sa.Enum('ADMIN', 'TEACHER', 'ACCOUNTANT', 'PARENT', name='userrole'),
-               existing_nullable=False)
+        if op.get_bind().dialect.name != 'postgresql':
+            batch_op.alter_column('role',
+                   existing_type=sa.VARCHAR(length=7),
+                   type_=sa.Enum('ADMIN', 'TEACHER', 'ACCOUNTANT', 'PARENT', name='userrole'),
+                   existing_nullable=False)
         batch_op.create_foreign_key('fk_user_teacher_id', 'teacher', ['teacher_id'], ['id'])
+
+    if op.get_bind().dialect.name == 'postgresql':
+        # النوع userrole أُنشئ في أول migration بقيم ADMIN/TEACHER/STAFF؛ نستبدله بالقيم الجديدة (STAFF ⇒ ACCOUNTANT)
+        op.execute("ALTER TYPE userrole RENAME TO userrole_old")
+        sa.Enum('ADMIN', 'TEACHER', 'ACCOUNTANT', 'PARENT', name='userrole').create(op.get_bind())
+        op.execute(
+            "ALTER TABLE \"user\" ALTER COLUMN role TYPE userrole USING "
+            "(CASE role::text WHEN 'STAFF' THEN 'ACCOUNTANT' ELSE role::text END)::userrole"
+        )
+        op.execute("DROP TYPE userrole_old")
 
     # ### end Alembic commands ###
 

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+e2e/
+test-results/
+playwright-report/
+playwright.config.ts
+.env
+.env.*
+*.log
+Dockerfile
+.dockerignore

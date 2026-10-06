@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 
 from app.core.audit import log_action
+from app.core.config import settings
 from app.core.deps import CurrentUser, OptionalCurrentUser, SessionDep
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User, UserRole
@@ -20,6 +21,11 @@ def register(
 ) -> User:
     is_bootstrap = session.exec(select(User)).first() is None
 
+    if is_bootstrap and not settings.ALLOW_BOOTSTRAP_REGISTRATION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="التسجيل الأولي معطّل؛ أنشئ المدير الأول بالأمر: python scripts/create_admin.py",
+        )
     if is_bootstrap:
         role = UserRole.ADMIN
         can_manage_users = True

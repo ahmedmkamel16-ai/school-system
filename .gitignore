@@ -1,0 +1,10 @@
+# أسرار وبيانات التشغيل — لا تُرفع أبدًا
+.env
+.env.*
+!.env.example
+!.env.production.example
+deploy/certbot/conf/
+deploy/certbot/www/
+backups/
+*.pem
+*.key

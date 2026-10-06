@@ -1,3 +1,4 @@
+import os
 from datetime import date
 
 import pytest
@@ -19,12 +20,17 @@ from app.models.user import User, UserRole
 
 @pytest.fixture()
 def session():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    """SQLite في الذاكرة افتراضيًا؛ TEST_DATABASE_URL=postgresql+psycopg://... يشغّل نفس الاختبارات على PostgreSQL."""
+    url = os.environ.get("TEST_DATABASE_URL")
+    if url:
+        engine = create_engine(url)
+        SQLModel.metadata.drop_all(engine)
+    else:
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as s:
         yield s
+    engine.dispose()
 
 
 @pytest.fixture()

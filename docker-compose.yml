@@ -1,0 +1,151 @@
+# نظام إدارة المدرسة — بيئة الإنتاج
+#   cp .env.production.example .env   # ثم عدّل القيم (انظر DEPLOYMENT.md)
+#   ./deploy.sh
+name: school-sis
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  restart: unless-stopped
+  logging: *default-logging
+
+services:
+  # ------------------------------------------------------------ قاعدة البيانات
+  db:
+    <<: *hardening
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-school_sis}
+      POSTGRES_USER: ${POSTGRES_USER:-school}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD مطلوب في .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    cap_add:           # يحتاجها إقلاع PostgreSQL الرسمي لضبط ملكية مجلد البيانات
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [data]   # شبكة داخلية معزولة: بلا منفذ منشور وبلا وصول للإنترنت
+
+  # ------------------------------------------------------------ الخادم (FastAPI + gunicorn)
+  backend:
+    <<: *hardening
+    image: school-sis/backend:latest
+    build:
+      context: ./backend
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.13-slim}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY مطلوب في .env}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-school}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-school_sis}
+      CORS_ORIGINS: '["https://${DOMAIN:?DOMAIN مطلوب في .env}"]'
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      ALLOW_BOOTSTRAP_REGISTRATION: ${ALLOW_BOOTSTRAP_REGISTRATION:-false}
+      FINANCIAL_HOLD_ENABLED: ${FINANCIAL_HOLD_ENABLED:-true}
+      FINANCIAL_HOLD_THRESHOLD_AMOUNT: ${FINANCIAL_HOLD_THRESHOLD_AMOUNT:-0}
+      FINANCIAL_HOLD_GRACE_DAYS: ${FINANCIAL_HOLD_GRACE_DAYS:-0}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    read_only: true
+    tmpfs:
+      - /tmp
+    stop_grace_period: 40s
+    deploy:
+      replicas: ${BACKEND_REPLICAS:-2}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks: [data, web]
+
+  # ------------------------------------------------------------ الواجهة (Nginx يقدّم ملفات React)
+  frontend:
+    <<: *hardening
+    image: school-sis/frontend:latest
+    build:
+      context: ./frontend
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        NGINX_IMAGE: ${FRONTEND_NGINX_IMAGE:-nginxinc/nginx-unprivileged:1.27-alpine}
+        VITE_API_URL: /api/v1
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      replicas: ${FRONTEND_REPLICAS:-2}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks: [web]
+
+  # ------------------------------------------------------------ الخادم العكسي: HTTPS + حماية + Rate Limiting
+  nginx-proxy:
+    <<: *hardening
+    image: nginx:1.27-alpine
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN مطلوب في .env}
+      NGINX_ENVSUBST_FILTER: ^DOMAIN$$   # نستبدل ${DOMAIN} فقط ولا نلمس متغيرات Nginx ($host...)
+    ports:
+      - "80:80"
+      - "443:443"
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETGID
+      - SETUID
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - ./deploy/nginx/proxy_params_school:/etc/nginx/proxy_params_school:ro
+      - ./deploy/certbot/conf:/etc/letsencrypt:ro
+      - ./deploy/certbot/www:/var/www/certbot:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+    networks: [web]
+
+  # ------------------------------------------------------------ شهادات SSL (تُشغَّل عند الطلب فقط: --profile tools)
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["tools"]
+    volumes:
+      - ./deploy/certbot/conf:/etc/letsencrypt
+      - ./deploy/certbot/www:/var/www/certbot
+    networks: [web]
+
+networks:
+  data:
+    internal: true     # لا اتصال خارجي: db و backend فقط
+  web:
+
+volumes:
+  pgdata:

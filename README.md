@@ -142,3 +142,9 @@ npm run dev
 2. تأكد من استيراده في `backend/app/models/__init__.py` وفي `backend/alembic/env.py`.
 3. ولّد ترحيلًا جديدًا: `alembic revision --autogenerate -m "وصف التغيير"`.
 4. راجع الملف المولَّد في `backend/alembic/versions/` ثم طبّقه: `alembic upgrade head`.
+
+## النشر والإنتاج
+
+- النشر على VPS بـ Docker (PostgreSQL + Nginx + HTTPS): راجع [DEPLOYMENT.md](DEPLOYMENT.md).
+- الاختبارات بكل طبقاتها: [TESTING.md](TESTING.md).
+- إعدادات الإنتاج: [.env.production.example](.env.production.example) — الخادم يرفض الإقلاع بمفتاح `SECRET_KEY` ضعيف.

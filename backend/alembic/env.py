@@ -41,7 +41,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# % في كلمة المرور المرمَّزة تُفسَّر كاستيفاء في configparser، فنضاعفها
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 # add your model's MetaData object here
 # for 'autogenerate' support

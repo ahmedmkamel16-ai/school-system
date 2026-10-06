@@ -313,3 +313,22 @@ def test_report_card_notes_are_teacher_notes_only(client, world):
     assert body["classroom_name"] == "أ"
     assert body["entries"][0]["notes"] == ["نصفي: جيد"]
     assert "سري" not in str(body)
+
+
+# ------------------------------------------------- التسجيل الأولي (Bootstrap)
+
+
+def test_bootstrap_registration_can_be_disabled(client, session, monkeypatch):
+    from sqlmodel import delete
+
+    from app.core.config import settings
+    from app.models.user import User
+
+    session.exec(delete(User))
+    session.commit()
+    body = {"email": "first@x.test", "full_name": "أول", "password": "Passw0rd!Passw0rd!"}
+    monkeypatch.setattr(settings, "ALLOW_BOOTSTRAP_REGISTRATION", False)
+    r = client.post("/api/v1/auth/register", json=body)
+    assert r.status_code == 403 and "create_admin" in r.json()["detail"]
+    monkeypatch.setattr(settings, "ALLOW_BOOTSTRAP_REGISTRATION", True)
+    assert client.post("/api/v1/auth/register", json=body).status_code == 200

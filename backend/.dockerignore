@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+*.db
+*.log
+tests/
+scripts/seed_e2e.py
+scripts/e2e_server.py
+requirements-dev.txt
+Dockerfile
+.dockerignore

@@ -174,6 +174,7 @@ def _receipts_to_read(session: SessionDep, receipts: list[PaymentReceipt]) -> li
         select(ReceiptAllocation, PaymentPlan.installment_no)
         .join(PaymentPlan, PaymentPlan.id == ReceiptAllocation.installment_id)
         .where(ReceiptAllocation.receipt_id.in_(ids))
+        .order_by(PaymentPlan.installment_no)  # ترتيب ثابت (PostgreSQL لا يضمن ترتيبًا بلا ORDER BY)
     ).all():
         allocations[alloc.receipt_id].append(
             {"installment_id": alloc.installment_id, "installment_no": number, "amount": alloc.amount}

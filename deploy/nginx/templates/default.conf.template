@@ -1,0 +1,136 @@
+# nginx-proxy: TLS + ترويسات الأمان + Rate Limiting + تمرير الطلبات.
+# يُولَّد من هذا القالب عند إقلاع الحاوية (envsubst على ${DOMAIN} فقط).
+
+# ---------------------------------------------------------------- حدود الطلبات (على مستوى http)
+limit_req_zone $binary_remote_addr zone=login:10m rate=5r/m;   # تسجيل الدخول: 5 محاولات/دقيقة لكل IP
+limit_req_zone $binary_remote_addr zone=api:10m   rate=20r/s;  # بقية الـ API
+limit_req_zone $binary_remote_addr zone=web:10m   rate=40r/s;  # ملفات الواجهة
+limit_conn_zone $binary_remote_addr zone=perip:10m;
+limit_req_status 429;
+limit_conn_status 429;
+
+server_tokens off;
+client_max_body_size 10m;            # رفع ملفات Excel للاستيراد
+client_body_timeout 15s;
+client_header_timeout 15s;
+send_timeout 30s;
+large_client_header_buffers 4 8k;
+
+gzip on;
+gzip_vary on;
+gzip_min_length 1024;
+gzip_types application/json text/plain text/css application/javascript image/svg+xml;
+
+# ---------------------------------------------------------------- أي مضيف آخر (مسح IP/نطاقات خاطئة): إسقاط الاتصال
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+server {
+    listen 443 ssl default_server;
+    http2 on;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
+# ---------------------------------------------------------------- فحص صحة داخلي (loopback داخل الحاوية فقط، غير منشور)
+# healthcheck و deploy.sh يستخدمانه دون TLS/SNI؛ /api/v1/health يمر عبر Nginx إلى الـ backend فعليًا.
+server {
+    listen 127.0.0.1:8081;
+    server_name localhost;
+    access_log off;
+    resolver 127.0.0.11 valid=5s ipv6=off;
+
+    location = /healthz {
+        default_type text/plain;
+        return 200 "ok";
+    }
+    location = /api/v1/health {
+        set $api_upstream http://backend:8000;
+        include /etc/nginx/proxy_params_school;
+        proxy_pass $api_upstream;
+    }
+}
+
+# ---------------------------------------------------------------- HTTP: تحدّي Let's Encrypt ثم تحويل إلى HTTPS
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ---------------------------------------------------------------- HTTPS
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # ترويسات الأمان (لا add_header داخل location حتى لا تُلغى هذه بسبب قاعدة الوراثة في Nginx)
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
+    # style-src 'unsafe-inline': تستخدم الواجهة style="" في أشرطة التقدم وقواعد الطباعة؛ السكربتات مقيَّدة بـ 'self' فقط
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests" always;
+
+    # DNS الداخلي لـ Docker بدقّة 5ث: يلتقط النسخ الجديدة/المحذوفة أثناء النشر المتدرّج بلا إعادة تشغيل
+    resolver 127.0.0.11 valid=5s ipv6=off;
+    set $api_upstream http://backend:8000;
+    set $web_upstream http://frontend:8080;
+
+    limit_conn perip 40;
+
+    if ($request_method !~ ^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$) {
+        return 405;
+    }
+
+    # حظر الملفات المخفية (.env, .git ...) وأنماط المسح الشائعة
+    location ~ /\.(?!well-known) { return 404; }
+    location ~* \.(php|asp|aspx|jsp|cgi|sql|bak|old|swp)$ { return 444; }
+    location ~* ^/(wp-admin|wp-login|wp-content|xmlrpc|phpmyadmin|cgi-bin|vendor|actuator) { return 444; }
+    # التوثيق التفاعلي معطّل أصلًا في الإنتاج؛ نحجبه هنا أيضًا كطبقة ثانية
+    location ~ ^/(docs|redoc|openapi\.json) { return 404; }
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok";
+    }
+
+    # تسجيل الدخول: حدّ صارم ضد تخمين كلمات المرور (إنشاء الحسابات يتبع حدّ الـ API لأنه للمدير فقط)
+    location = /api/v1/auth/login {
+        limit_req zone=login burst=5 nodelay;
+        include /etc/nginx/proxy_params_school;
+        proxy_pass $api_upstream;
+    }
+
+    location /api/ {
+        limit_req zone=api burst=60 nodelay;
+        include /etc/nginx/proxy_params_school;
+        proxy_pass $api_upstream;
+    }
+
+    location / {
+        limit_req zone=web burst=80 nodelay;
+        include /etc/nginx/proxy_params_school;
+        proxy_pass $web_upstream;
+    }
+}
