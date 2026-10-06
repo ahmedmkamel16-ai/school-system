@@ -98,7 +98,7 @@ export function ReportCardView({
                   <td className="border border-neutral-400 p-2">{entry.subject_name}</td>
                   <td className="border border-neutral-400 p-2 text-center">{formatNumber(pct)}</td>
                   <td className="border border-neutral-400 p-2 text-center">
-                    {grade.label} ({grade.letter})
+                    {grade.label}
                   </td>
                   <td className="border border-neutral-400 p-2 text-center">{formatNumber(grade.points, 1)}</td>
                 </tr>

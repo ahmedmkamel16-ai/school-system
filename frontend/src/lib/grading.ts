@@ -36,13 +36,14 @@ export const OVERALL_RESULT_LABELS: Record<OverallResult, string> = {
   incomplete: 'غير مكتمل',
 }
 
-/** سلم التقدير وGPA (4.0) للعرض فقط؛ النجاح والنسب تُحسب في الخادم. عدّل الحدود هنا إن اختلف نظام مدرستكم. */
+/** سلم التقدير (بالكلمات) وGPA من 4.0 للعرض فقط؛ النجاح والنسب تُحسب في الخادم. عدّل الحدود هنا إن لزم. */
 export const GRADE_SCALE = [
-  { min: 90, letter: 'A', label: 'ممتاز', points: 4 },
-  { min: 80, letter: 'B', label: 'جيد جدًا', points: 3 },
-  { min: 70, letter: 'C', label: 'جيد', points: 2 },
-  { min: 50, letter: 'D', label: 'مقبول', points: 1 },
-  { min: 0, letter: 'F', label: 'راسب', points: 0 },
+  { min: 90, label: 'ممتاز', points: 4 },
+  { min: 80, label: 'جيد جدًا', points: 3.5 },
+  { min: 70, label: 'جيد', points: 3 },
+  { min: 60, label: 'متوسط', points: 2.5 },
+  { min: 50, label: 'مقبول', points: 2 },
+  { min: 0, label: 'راسب', points: 0 },
 ] as const
 
 export function gradeFor(percentage: number) {
