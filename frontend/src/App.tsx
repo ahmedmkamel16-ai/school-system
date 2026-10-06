@@ -7,6 +7,7 @@ import { TeachersPage } from '@/pages/TeachersPage'
 import { ClassesPage } from '@/pages/ClassesPage'
 import { UsersPage } from '@/pages/UsersPage'
 import { AuditLogPage } from '@/pages/AuditLogPage'
+import { GradesPage } from '@/pages/GradesPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { useAuth } from '@/lib/auth'
 
@@ -59,6 +60,7 @@ function App() {
             </RequireNotParent>
           }
         />
+        <Route path="/grades" element={<GradesPage />} />
         <Route
           path="/users"
           element={

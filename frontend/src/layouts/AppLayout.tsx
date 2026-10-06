@@ -8,6 +8,7 @@ import {
   School,
   ShieldCheck,
   ScrollText,
+  ClipboardList,
   LogOut,
   Moon,
   Sun,
@@ -42,6 +43,7 @@ export function AppLayout() {
     { to: '/students', label: isParent ? 'أبنائي' : 'الطلاب', icon: Users },
     ...(isParent ? [] : [{ to: '/teachers', label: 'المعلمون', icon: UserRound }]),
     ...(isParent ? [] : [{ to: '/classes', label: 'الشعب الدراسية', icon: School }]),
+    { to: '/grades', label: isParent ? 'درجات أبنائي' : 'الدرجات', icon: ClipboardList },
     ...(canManageUsers
       ? [{ to: '/users', label: 'المستخدمون', icon: ShieldCheck }]
       : []),
