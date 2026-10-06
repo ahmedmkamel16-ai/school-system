@@ -222,7 +222,7 @@ def test_guardian_sees_only_published_own_children_without_sensitive_fields(clie
     assert r.status_code == 200
     body = r.json()
     assert body["overall_percentage"] == "68.00" and body["student_name"] == "طالب1"
-    assert set(body) == {"id", "student_name", "term", "academic_year", "overall_percentage", "overall_result", "published_at", "entries"}
+    assert set(body) == {"id", "student_name", "classroom_name", "term", "academic_year", "overall_percentage", "overall_result", "published_at", "entries"}
     assert "سري" not in r.text and "created_by" not in r.text and "internal_note" not in r.text
     # ولي أمر آخر، طالب غير مربوط، معلم، مدير ⇒ لا وصول
     assert client.get(url, params=Q, headers=world.p2).status_code == 404
@@ -246,3 +246,70 @@ def test_published_card_is_a_stable_snapshot_until_republished(client, world, se
     # إعادة النشر تحدّث اللقطة: 60 + 20 = 80
     assert client.post(pub, params=Q, headers=world.admin).json()["overall_percentage"] == "80.00"
     assert client.get(GRC.format(world.s1.id), params=Q, headers=world.p1).json()["overall_percentage"] == "80.00"
+
+
+# ------------------------------------------------- GET /exams, /exams/{id}
+
+
+def test_list_exams_scoped_by_role_and_filtered(client, world):
+    e1 = make_exam(client, world, title="امتحان1", weight_percent="30")
+    make_exam(client, world, title="امتحان2", weight_percent="30", term="second")
+    make_exam(client, world, who="admin", subject_id=world.arabic.id, classroom_id=world.c2.id)
+    client.patch(f"/api/v1/exams/{e1['id']}/status", json={"status": "published"}, headers=world.admin)
+
+    assert len(client.get("/api/v1/exams", headers=world.admin).json()) == 3
+    mine = client.get("/api/v1/exams", headers=world.ta).json()
+    assert len(mine) == 2 and {e["subject_name"] for e in mine} == {"رياضيات"}
+    assert client.get("/api/v1/exams", headers=world.tb).json() == []
+    for who in ("acc", "p1"):
+        assert client.get("/api/v1/exams", headers=getattr(world, who)).status_code == 403
+    assert client.get("/api/v1/exams").status_code == 401
+
+    def count(**params):
+        return len(client.get("/api/v1/exams", params=params, headers=world.admin).json())
+
+    assert count(class_id=world.c2.id) == 1
+    assert count(subject_id=world.math.id) == 2
+    assert count(status="published") == 1 and count(status="draft") == 2
+    assert count(term="second") == 1
+    assert count(academic_year="2025/2026") == 3
+    assert client.get("/api/v1/exams", params={"status": "bogus"}, headers=world.admin).status_code == 422
+    # teacher filter cannot widen scope
+    assert client.get("/api/v1/exams", params={"class_id": world.c2.id}, headers=world.ta).json() == []
+    item = mine[0]
+    assert item["classroom_name"] == "أ" and item["students_count"] == 2 and item["graded_count"] == 0
+
+
+def test_exam_detail_returns_gradebook_rows_with_scope(client, world):
+    exam = make_exam(client, world)
+    bulk(client, world, exam["id"], [dict(student_id=world.s1.id, score="42.5", teacher_note="ممتاز", internal_note="خاص")])
+    r = client.get(f"/api/v1/exams/{exam['id']}", headers=world.ta)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["graded_count"] == 1 and body["students_count"] == 2
+    rows = {row["student_id"]: row for row in body["rows"]}
+    assert set(rows) == {world.s1.id, world.s2.id}  # طلاب فصل الامتحان فقط
+    assert rows[world.s1.id]["score"] == "42.50" and rows[world.s1.id]["internal_note"] == "خاص"
+    assert rows[world.s2.id]["status"] is None and rows[world.s2.id]["result_id"] is None
+    assert client.get(f"/api/v1/exams/{exam['id']}", headers=world.admin).status_code == 200
+    for who in ("tb", "acc", "p1"):
+        assert client.get(f"/api/v1/exams/{exam['id']}", headers=getattr(world, who)).status_code == 404
+    assert client.get(f"/api/v1/exams/{uuid.uuid4()}", headers=world.admin).status_code == 404
+    assert client.get("/api/v1/exams/not-a-uuid", headers=world.admin).status_code == 422
+
+
+def test_assignments_follow_teacher_scope(client, world):
+    mine = client.get("/api/v1/exams/assignments", headers=world.ta).json()
+    assert [(a["classroom_id"], a["subject_id"]) for a in mine] == [(world.c1.id, world.math.id)]
+    assert client.get("/api/v1/exams/assignments", headers=world.tb).json() == []
+    assert len(client.get("/api/v1/exams/assignments", headers=world.admin).json()) == 4
+    assert client.get("/api/v1/exams/assignments", headers=world.p1).status_code == 403
+
+
+def test_report_card_notes_are_teacher_notes_only(client, world):
+    publish_two_exams(client, world)
+    client.post(RC.format(world.s1.id) + "/publish", params=Q, headers=world.admin)
+    body = client.get(GRC.format(world.s1.id), params=Q, headers=world.p1).json()
+    assert body["classroom_name"] == "أ"
+    assert body["entries"][0]["notes"] == ["نصفي: جيد"]
+    assert "سري" not in str(body)

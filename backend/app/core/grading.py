@@ -63,6 +63,28 @@ def teacher_can_grade(session: Session, user: User, classroom_id: int, subject_i
     )
 
 
+def teacher_scope_pairs(session: Session, user: User) -> set[tuple[int, int]]:
+    """كل أزواج (فصل، مادة) المنسوبة للمعلم — نفس قاعدة teacher_can_grade لكن دفعة واحدة."""
+    if user.role != UserRole.TEACHER or user.teacher_id is None:
+        return set()
+    pairs = {
+        (c, s)
+        for c, s in session.exec(
+            select(TimetableSlot.classroom_id, TimetableSlot.subject_id).where(
+                TimetableSlot.teacher_id == user.teacher_id
+            )
+        ).all()
+    }
+    homeroom = session.exec(
+        select(ClassRoom.id).where(ClassRoom.homeroom_teacher_id == user.teacher_id)
+    ).all()
+    subjects = session.exec(
+        select(TeacherSubject.subject_id).where(TeacherSubject.teacher_id == user.teacher_id)
+    ).all()
+    pairs.update((c, s) for c in homeroom for s in subjects)
+    return pairs
+
+
 def can_manage_exam(session: Session, user: User, classroom_id: int, subject_id: int) -> bool:
     return is_admin(user) or teacher_can_grade(session, user, classroom_id, subject_id)
 

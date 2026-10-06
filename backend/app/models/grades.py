@@ -345,12 +345,14 @@ class ReportCardEntryRead(_Output):
     subject_id: int
     subject_name: str | None = None
     weighted_percentage: Decimal
+    notes: list[str] = []  # ملاحظات المعلم الموجَّهة لولي الأمر فقط (لا internal_note أبدًا)
 
 
 class ReportCardRead(_Output):
     id: uuid.UUID
     student_id: int
     student_name: str | None = None
+    classroom_name: str | None = None
     term: Term
     academic_year: str
     overall_percentage: Decimal | None
@@ -362,6 +364,42 @@ class ReportCardRead(_Output):
     updated_at: datetime
     created_by: int
     updated_by: int | None
+
+
+class ExamListRead(ExamRead):
+    """عنصر قائمة الامتحانات: يضيف الأسماء وتقدّم رصد الدرجات."""
+
+    classroom_name: str | None = None
+    subject_name: str | None = None
+    students_count: int = 0
+    graded_count: int = 0  # عدد من لديهم سجل (درجة/غائب/معفى)
+
+
+class GradebookRow(_Output):
+    """طالب واحد في دفتر الدرجات، مع سجله الحالي إن وُجد (للطاقم فقط)."""
+
+    student_id: int
+    student_name: str
+    result_id: uuid.UUID | None = None
+    status: ResultStatus | None = None
+    score: Decimal | None = None
+    teacher_note: str | None = None
+    internal_note: str | None = None
+
+
+class ExamDetailRead(ExamListRead):
+    rows: list[GradebookRow] = []
+
+
+class ExamAssignment(_Output):
+    """زوج (فصل، مادة) يحق للمستخدم إنشاء امتحانات له."""
+
+    classroom_id: int
+    classroom_name: str
+    grade_level: str
+    academic_year: str
+    subject_id: int
+    subject_name: str
 
 
 # --- لولي الأمر: بلا created_by ولا internal_note ولا بيانات تدقيق ولا امتحانات غير منشورة ---
@@ -389,6 +427,7 @@ class GuardianResultRead(_Output):
 class GuardianReportCardRead(_Output):
     id: uuid.UUID
     student_name: str | None = None
+    classroom_name: str | None = None
     term: Term
     academic_year: str
     overall_percentage: Decimal | None
