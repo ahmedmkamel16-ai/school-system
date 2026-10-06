@@ -7,6 +7,8 @@
 ```bash
 cd /opt/school-system
 
+./setup.sh                                    # أول مرة: معالج يسألك ويولّد .env (يرمّز كلمة مرور Supabase ويبني الرابطين) ثم يكمل الفحص والتشغيل
+
 ./deploy.sh                                   # نشر/تحديث كل شيء (git pull ← بناء ← نسخة احتياطية ← migrations ← تحديث متدرّج)
 docker compose exec backend python scripts/create_admin.py --email you@school.iq --name "مدير النظام"   # إنشاء المدير
 docker compose run --rm --no-deps -e RUN_MIGRATIONS=0 backend python scripts/check_db.py                 # فحص الاتصال بـ Supabase
