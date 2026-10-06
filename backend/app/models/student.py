@@ -23,6 +23,9 @@ class Student(SQLModel, table=True):
     status: StudentStatus = Field(default=StudentStatus.ACTIVE)
     classroom_id: int | None = Field(default=None, foreign_key="classroom.id")
     guardian_user_id: int | None = Field(default=None, foreign_key="user.id")
+    # استثناء من الحجب المالي: يضبطه المدير فقط عبر /financials/students/{id}/hold-exemption
+    financial_hold_exempt: bool = Field(default=False, sa_column_kwargs={"server_default": "0"})
+    financial_hold_notes: str | None = Field(default=None, max_length=500)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     classroom: "ClassRoom" = Relationship(back_populates="students")

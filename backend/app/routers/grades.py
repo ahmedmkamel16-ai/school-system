@@ -33,7 +33,9 @@ from app.models.grades import (
     ExamStatus,
     ExamStatusChange,
     GradebookRow,
+    GuardianReportCardList,
     GuardianReportCardRead,
+    GuardianReportCardSummary,
     ReportCard,
     ReportCardEntry,
     ReportCardRead,
@@ -449,6 +451,33 @@ def publish_report_card(
         f"نشر كشف درجات الطالب {student.full_name} ({card.id})",
     )
     return _card_to_read(session, card, student, ReportCardRead)
+
+
+@router.get("/guardian/students/{student_id}/report-cards", response_model=GuardianReportCardList)
+def list_guardian_report_cards(
+    student_id: int, session: SessionDep, current_user: CurrentUser
+) -> GuardianReportCardList:
+    """كشوف ابن ولي الأمر المنشورة (بلا أرقام). عند الحجب المالي: قائمة فارغة + رسالة المراجعة."""
+    if current_user.role != UserRole.PARENT:
+        raise _forbidden("هذا المسار مخصص لأولياء الأمور")
+    student = session.exec(
+        select(Student).where(Student.id == student_id, Student.guardian_user_id == current_user.id)
+    ).first()
+    if student is None:
+        raise _not_found("الطالب غير موجود")
+    if has_financial_hold(session, student.id):
+        return GuardianReportCardList(financial_hold=True, hold_message=HOLD_MESSAGE, cards=[])
+    cards = session.exec(
+        select(ReportCard)
+        .where(ReportCard.student_id == student.id, ReportCard.status == ReportCardStatus.PUBLISHED)
+        .order_by(ReportCard.academic_year.desc(), ReportCard.term)
+    ).all()
+    return GuardianReportCardList(
+        cards=[
+            GuardianReportCardSummary(term=c.term, academic_year=c.academic_year, published_at=c.published_at)
+            for c in cards
+        ]
+    )
 
 
 @router.get("/guardian/students/{student_id}/report-card", response_model=GuardianReportCardRead)

@@ -292,8 +292,10 @@ def test_statement_visibility(client, world):
     body = r.json()
     text = r.text
     assert D(body["totals"]["paid_total"]) == D(700) and body["receipts"][0]["amount"] == "700.00"
-    for secret in ("TRX-SECRET", "ملاحظة داخلية", "collected_by", "created_by", "verification_code", "idempotency"):
+    for secret in ("TRX-SECRET", "ملاحظة داخلية", "collected_by", "created_by", "idempotency"):
         assert secret not in text
+    # رمز التحقق + التفقيط لازمان لطباعة السند، ولا يكشفان شيئًا داخليًا
+    assert body["receipts"][0]["amount_in_words"] == "سبعمائة دينار فقط لا غير" and body["receipts"][0]["verification_code"]
     # ولي أمر آخر / طالب غير مربوط / معلم / بلا دخول
     assert client.get(f"{API}/students/{world.s1.id}/statement", headers=world.p2).status_code == 404
     assert client.get(f"{API}/students/{world.s3.id}/statement", headers=world.p1).status_code == 404
@@ -396,3 +398,142 @@ def test_financial_hold_blocks_guardian_report_card(client, world, monkeypatch):
     assert client.get(GRC.format(world.s1.id), params=Q, headers=world.p1).status_code == 200
     client.post(f"{API}/receipts/{receipt['id']}/reverse", json={"reason": "سند خاطئ"}, headers=world.admin)
     assert client.get(GRC.format(world.s1.id), params=Q, headers=world.p1).status_code == 403
+
+
+# ------------------------------------------------------------- تفقيط، استثناء الحجب، التصدير
+
+
+@pytest.mark.parametrize(
+    "amount, words",
+    [
+        ("150000", "مائة وخمسون ألف دينار فقط لا غير"),
+        ("1", "دينار واحد فقط لا غير"),
+        ("2", "ديناران فقط لا غير"),
+        ("3", "ثلاثة دنانير فقط لا غير"),
+        ("21", "واحد وعشرون دينارًا فقط لا غير"),
+        ("100", "مائة دينار فقط لا غير"),
+        ("1000", "ألف دينار فقط لا غير"),
+        ("2000", "ألفا دينار فقط لا غير"),
+        ("2500", "ألفان وخمسمائة دينار فقط لا غير"),
+        ("3000", "ثلاثة آلاف دينار فقط لا غير"),
+        ("11000", "أحد عشر ألف دينار فقط لا غير"),
+        ("200000", "مائتا ألف دينار فقط لا غير"),
+        ("2500500", "مليونان وخمسمائة ألف وخمسمائة دينار فقط لا غير"),
+        ("1000000000", "مليار دينار فقط لا غير"),
+        ("0.25", "مائتان وخمسون فلسًا فقط لا غير"),
+        ("0", "صفر دينار فقط لا غير"),
+    ],
+)
+def test_amount_in_words(amount, words):
+    from app.core.arabic_numbers import amount_in_words
+
+    assert amount_in_words(amount) == words
+    with pytest.raises(ValueError):
+        amount_in_words("-1")
+
+
+def test_receipt_carries_amount_in_words(client, world):
+    structure = make_structure(client, world, total_amount="300000")
+    make_plan(client, world, structure)
+    fee = statement(client, world, world.s1.id)["fees"][0]
+    assert pay(client, world, fee["id"], "150000").json()["amount_in_words"] == "مائة وخمسون ألف دينار فقط لا غير"
+
+
+def _overdue_setup(client, world):
+    structure = make_structure(client, world)
+    make_plan(client, world, structure)
+    publish_two_exams(client, world)
+    client.post(RC.format(world.s1.id) + "/publish", params=Q, headers=world.admin)
+    return statement(client, world, world.s1.id)["fees"][0]
+
+
+def test_hold_exemption_is_admin_only_and_lifts_the_hold(client, world):
+    _overdue_setup(client, world)
+    url = f"{API}/students/{world.s1.id}/hold-exemption"
+    assert client.get(GRC.format(world.s1.id), params=Q, headers=world.p1).status_code == 403
+    for who in ("acc", "ta", "p1"):
+        assert client.put(url, json={"exempt": True, "notes": "اتفاق خاص مع الإدارة"}, headers=getattr(world, who)).status_code == 403
+    assert client.put(url, json={"exempt": True}, headers=world.admin).status_code == 422          # السبب إلزامي
+    assert client.put(url, json={"exempt": True, "notes": "قصير"}, headers=world.admin).status_code == 422
+    assert client.put(url, json={"exempt": True, "notes": "x" * 501}, headers=world.admin).status_code == 422
+    assert client.put(url, json={"exempt": True, "notes": "ok-ok", "id": 1}, headers=world.admin).status_code == 422
+    assert client.put(f"{API}/students/9999/hold-exemption", json={"exempt": True, "notes": "اتفاق خاص"}, headers=world.admin).status_code == 404
+
+    r = client.put(url, json={"exempt": True, "notes": "اتفاق خاص مع الإدارة"}, headers=world.admin)
+    assert r.status_code == 200 and r.json()["hold_exempt"] is True
+    assert client.get(GRC.format(world.s1.id), params=Q, headers=world.p1).status_code == 200      # الشهادة تُعرض رغم المتأخرات
+    staff = statement(client, world, world.s1.id)
+    assert staff["hold_exempt"] is True and staff["hold_exempt_notes"] == "اتفاق خاص مع الإدارة" and staff["financial_hold"] is False
+    assert D(staff["totals"]["overdue_amount"]) == 1000                                              # الدين ما زال ظاهرًا
+    row = client.get(f"{API}/defaulters", headers=world.acc).json()[0]
+    assert row["hold_exempt"] is True and row["financial_hold"] is False
+    assert client.get(f"{API}/summary", headers=world.acc).json()["held_students"] == 0
+    guardian = client.get(f"{API}/students/{world.s1.id}/statement", headers=world.p1)
+    assert "اتفاق خاص" not in guardian.text and "hold_exempt" not in guardian.text                   # لا تسرّب لولي الأمر
+    cards = client.get(f"/api/v1/guardian/students/{world.s1.id}/report-cards", headers=world.p1).json()
+    assert cards["financial_hold"] is False and len(cards["cards"]) == 1
+
+    client.put(url, json={"exempt": False}, headers=world.admin)
+    assert client.get(GRC.format(world.s1.id), params=Q, headers=world.p1).status_code == 403
+    assert statement(client, world, world.s1.id)["hold_exempt_notes"] is None
+
+
+def test_guardian_report_card_list_and_hold(client, world):
+    _overdue_setup(client, world)
+    url = f"/api/v1/guardian/students/{world.s1.id}/report-cards"
+    held = client.get(url, headers=world.p1).json()
+    assert held == {"financial_hold": True, "hold_message": "يرجى مراجعة الحسابات", "cards": []}
+    assert client.get(url, headers=world.p2).status_code == 404       # ليس ابنه
+    assert client.get(url, headers=world.acc).status_code == 403
+    assert client.get(url).status_code == 401
+    fee = statement(client, world, world.s1.id)["fees"][0]
+    pay(client, world, fee["id"], "1000")
+    ok = client.get(url, headers=world.p1).json()
+    assert ok["financial_hold"] is False and ok["cards"][0]["term"] == "first" and "overall_percentage" not in ok["cards"][0]
+
+
+def test_parent_sees_only_own_childrens_timetable_and_classes(client, world):
+    # p1 ابنه في الفصل c1 فقط؛ جدول c2 وقائمة الفصول مقيَّدان
+    assert client.get("/api/v1/timetable", params={"classroom_id": world.c1.id}, headers=world.p1).status_code == 200
+    assert client.get("/api/v1/timetable", params={"classroom_id": world.c2.id}, headers=world.p1).status_code == 404
+    names = [c["name"] for c in client.get("/api/v1/classes", headers=world.p1).json()]
+    assert names == ["أ"]
+
+
+def _load_xlsx(response):
+    import io
+
+    import openpyxl
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert "attachment" in response.headers["content-disposition"]
+    return openpyxl.load_workbook(io.BytesIO(response.content)).active
+
+
+def test_excel_exports(client, world, session):
+    fee = _overdue_setup(client, world)
+    make_plan(client, world, make_structure(client, world, name="ثانٍ"), student_id=world.s2.id)
+    sheet = _load_xlsx(client.get(f"{API}/defaulters/export", headers=world.acc))
+    assert sheet.sheet_view.rightToLeft is True
+    assert [c.value for c in sheet[1]][:2] == ["الطالب", "الشعبة"]
+    assert {sheet.cell(row=r, column=1).value for r in (2, 3)} == {"طالب1", "طالب2"}
+    assert sheet.cell(row=4, column=1).value == "الإجمالي" and sheet.cell(row=4, column=5).value == 2000
+    assert sheet.cell(row=2, column=5).number_format == "#,##0.##"
+    assert _load_xlsx(client.get(f"{API}/defaulters/export", params={"classroom_id": world.c2.id}, headers=world.admin)).max_row == 2  # الترويسة + الإجمالي
+    for who in ("ta", "p1"):
+        assert client.get(f"{API}/defaulters/export", headers=getattr(world, who)).status_code == 403
+        assert client.get(f"{API}/receipts/export", headers=getattr(world, who)).status_code == 403
+    assert client.get(f"{API}/defaulters/export").status_code == 401
+
+    # المقبوضات: عكس بقيمة سالبة والصافي في الأسفل، وحقن الصيغ يُخزَّن نصًا
+    r1 = pay(client, world, fee["id"], "1000", note="=HYPERLINK(\"http://evil\",\"x\")").json()
+    pay(client, world, fee["id"], "500", method="transfer", reference="+SUM(A1)")
+    client.post(f"{API}/receipts/{r1['id']}/reverse", json={"reason": "-cmd|' /C calc'!A0"}, headers=world.admin)
+    sheet = _load_xlsx(client.get(f"{API}/receipts/export", params={"date_from": TODAY.isoformat(), "date_to": TODAY.isoformat()}, headers=world.acc))
+    values = [[c.value for c in row] for row in sheet.iter_rows(min_row=2)]
+    assert [v[7] for v in values[:3]] == [1000, 500, -1000] and values[3][7] == 500 and values[3][0] == "الصافي"
+    body = [(c.value, c.data_type) for row in sheet.iter_rows(min_row=2, max_row=4) for c in row if isinstance(c.value, str) and c.value[:1] in "=+-@"]
+    assert body and all(dtype == "s" for _, dtype in body), body
+    assert any("HYPERLINK" in v for v, _ in body) and any(v.startswith("+SUM") for v, _ in body)
+    assert client.get(f"{API}/receipts/export", params={"date_to": (TODAY - timedelta(days=5)).isoformat()}, headers=world.acc).status_code == 200

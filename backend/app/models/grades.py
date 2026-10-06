@@ -420,6 +420,20 @@ class GuardianReportCardRead(_Output):
     entries: list[ReportCardEntryRead] = []
 
 
+class GuardianReportCardSummary(_Output):
+    term: Term
+    academic_year: str
+    published_at: datetime | None
+
+
+class GuardianReportCardList(_Output):
+    """قائمة كشوف الابن المنشورة. عند الحجب المالي تكون القائمة فارغة وتُرفق الرسالة."""
+
+    financial_hold: bool = False
+    hold_message: str | None = None
+    cards: list[GuardianReportCardSummary] = []
+
+
 # ---------------------------------------------------------------------------
 # 5) تحققات تحتاج قاعدة البيانات / الامتحان (تُستدعى من الـ routers داخل المعاملة)
 # ---------------------------------------------------------------------------

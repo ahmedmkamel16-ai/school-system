@@ -119,6 +119,9 @@ def has_financial_hold(session: Session, student_id: int, today: date | None = N
     """حجب الشهادة: المتأخر (بعد السماح) يتجاوز الحد المضبوط في الإعدادات."""
     if not settings.FINANCIAL_HOLD_ENABLED:
         return False
+    student = session.get(Student, student_id)
+    if student is not None and student.financial_hold_exempt:
+        return False  # استثناء مباشر من المدير (له سبب موثَّق)
     amount, _ = overdue_total(session, student_id, today, settings.FINANCIAL_HOLD_GRACE_DAYS)
     return amount > settings.FINANCIAL_HOLD_THRESHOLD_AMOUNT
 

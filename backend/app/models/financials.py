@@ -260,6 +260,19 @@ class ReceiptCreate(_StrictInput):
         return v or None
 
 
+class HoldExemptionUpdate(_StrictInput):
+    """استثناء طالب من الحجب المالي (المدير فقط). السبب إلزامي عند التفعيل ليبقى موثَّقًا."""
+
+    exempt: bool
+    notes: ShortText | None = None
+
+    @model_validator(mode="after")
+    def _notes_required(self) -> "HoldExemptionUpdate":
+        if self.exempt and (not self.notes or len(self.notes) < 5):
+            raise ValueError("سبب الاستثناء مطلوب (5 أحرف على الأقل)")
+        return self
+
+
 class ReceiptReverse(_StrictInput):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=5, max_length=500)]
 
@@ -328,6 +341,7 @@ class ReceiptRead(_Output):
     student_name: str | None = None
     fee_name: str | None = None
     amount: Decimal
+    amount_in_words: str = ""
     method: PaymentMethod
     reference: str | None
     paid_at: date
@@ -345,13 +359,17 @@ class ReceiptRead(_Output):
 class GuardianReceiptRead(_Output):
     """لولي الأمر: بلا المحصِّل ولا المرجع ولا الملاحظات الداخلية."""
 
+    id: uuid.UUID
     receipt_number: str
     kind: ReceiptKind
+    student_name: str | None = None
     amount: Decimal
+    amount_in_words: str = ""
     method: PaymentMethod
     paid_at: date
     is_reversed: bool = False
     fee_name: str | None = None
+    verification_code: str  # لازم لطباعة السند مع QR؛ ولي الأمر يملك سنداته فقط
 
 
 class StatementTotals(_Output):
@@ -370,6 +388,8 @@ class StatementRead(_Output):
     receipts: list[ReceiptRead]
     totals: StatementTotals
     financial_hold: bool
+    hold_exempt: bool = False
+    hold_exempt_notes: str | None = None
 
 
 class GuardianStatementRead(_Output):
@@ -400,6 +420,7 @@ class DefaulterRead(_Output):
     days_overdue: int
     remaining_total: Decimal
     financial_hold: bool
+    hold_exempt: bool = False
 
 
 class MethodTotal(_Output):

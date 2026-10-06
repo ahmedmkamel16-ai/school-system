@@ -7,15 +7,23 @@
   * المعلم: لا وصول.
 """
 
+import io
 import uuid
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated
 
+from urllib.parse import quote
+
+import openpyxl
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from sqlmodel import func, select
 
+from app.core.arabic_numbers import amount_in_words
 from app.core.audit import log_action
 from app.core.config import settings
 from app.core.deps import CurrentUser, SessionDep
@@ -43,6 +51,7 @@ from app.models.financials import (
     FinancialSummaryRead,
     GuardianReceiptRead,
     GuardianStatementRead,
+    HoldExemptionUpdate,
     InstallmentRead,
     InstallmentStatus,
     MethodTotal,
@@ -63,6 +72,8 @@ from app.models.financials import (
 )
 from app.models.student import Student, StudentStatus
 from app.models.user import User, UserRole
+
+XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 router = APIRouter(prefix="/financials", tags=["financials"])
 
@@ -177,6 +188,7 @@ def _receipts_to_read(session: SessionDep, receipts: list[PaymentReceipt]) -> li
                 "collected_by": r.created_by,
                 "collected_by_name": collectors.get(r.created_by),
                 "verification_code": verification_code(r),
+                "amount_in_words": amount_in_words(r.amount),
                 "allocations": allocations.get(r.id, []),
             }
         )
@@ -198,6 +210,61 @@ def _totals(fees: list[StudentFeeRead]) -> StatementTotals:
 def _classroom_name(session: SessionDep, student: Student) -> str | None:
     classroom = session.get(ClassRoom, student.classroom_id) if student.classroom_id else None
     return classroom.name if classroom else None
+
+
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _xlsx_response(filename, sheet_title, headers, rows, total_row, money_cols: set[int], date_cols: set[int]) -> StreamingResponse:
+    """ملف Excel عربي (RTL). أي نص يبدأ بـ = + - @ يُخزَّن نصًا صريحًا حتى لا يُنفَّذ كصيغة (Formula Injection)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+    ws.sheet_view.rightToLeft = True
+    ws.append(headers)
+    header_fill = PatternFill("solid", fgColor="1F2937")
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    def put(row_index: int, values: list) -> None:
+        for col, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_index, column=col)
+            if isinstance(value, str):
+                cell.value = value
+                if value.startswith(_FORMULA_PREFIXES):
+                    cell.data_type = "s"  # نص صريح لا صيغة
+            elif isinstance(value, Decimal):
+                cell.value = float(value)
+            else:
+                cell.value = value
+            if col in money_cols and value is not None:
+                cell.number_format = "#,##0.##"
+            if col in date_cols and isinstance(value, date):
+                cell.number_format = "yyyy-mm-dd"
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    for i, values in enumerate(rows, start=2):
+        put(i, values)
+    last = len(rows) + 2
+    put(last, total_row)
+    for cell in ws[last]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E5E7EB")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(len(rows) + 1, 1)}"
+    for col in range(1, len(headers) + 1):
+        longest = max(len(str(ws.cell(row=r, column=col).value or "")) for r in range(1, last + 1))
+        ws.column_dimensions[get_column_letter(col)].width = min(max(12, longest + 4), 48)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type=XLSX_MEDIA,
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 # ---------------------------------------------------------------- الرسوم المقررة
@@ -351,6 +418,40 @@ def list_receipts(
     return _receipts_to_read(session, list(session.exec(query).all()))
 
 
+@router.get("/receipts/export")
+def export_receipts(
+    session: SessionDep,
+    current_user: CurrentUser,
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+) -> StreamingResponse:
+    """تقرير المقبوضات بصيغة Excel (حد أقصى 5000 سند). سندات العكس بقيم سالبة والإجمالي صافٍ."""
+    _require_finance_staff(current_user)
+    query = select(PaymentReceipt)
+    if date_from:
+        query = query.where(PaymentReceipt.paid_at >= date_from)
+    if date_to:
+        query = query.where(PaymentReceipt.paid_at <= date_to)
+    receipts = _receipts_to_read(
+        session, list(session.exec(query.order_by(PaymentReceipt.paid_at, PaymentReceipt.created_at).limit(5000)).all())
+    )
+    headers = ["رقم السند", "التاريخ", "الطالب", "البند", "النوع", "طريقة الدفع", "المرجع", "المبلغ (د.ع)", "المحصِّل", "حالة", "ملاحظة"]
+    signed = lambda r: r.amount if r.kind == ReceiptKind.PAYMENT else -r.amount  # noqa: E731
+    data = [
+        [
+            r.receipt_number, r.paid_at, r.student_name or "", r.fee_name or "",
+            "سند قبض" if r.kind == ReceiptKind.PAYMENT else "سند عكس",
+            {"cash": "نقدي", "transfer": "حوالة", "zain_cash": "زين كاش"}[r.method.value],
+            r.reference or "", signed(r), r.collected_by_name or "", "معكوس" if r.is_reversed else "", r.note or r.reversal_reason or "",
+        ]
+        for r in receipts
+    ]
+    total_row = ["الصافي", None, "", "", "", "", "", q(sum((signed(r) for r in receipts), Decimal(0))), "", "", ""]
+    suffix = f"{date_from or 'all'}_{date_to or 'all'}"
+    log_action(session, current_user, "export", "payment_receipts", None, f"تصدير المقبوضات {suffix} ({len(receipts)} سند)")
+    return _xlsx_response(f"receipts-{suffix}.xlsx", "المقبوضات", headers, data, total_row, money_cols={8}, date_cols={2})
+
+
 @router.get("/receipts/verify", response_model=ReceiptVerifyRead)
 def verify_receipt(session: SessionDep, number: str = Query(max_length=32), code: str = Query(max_length=64)) -> ReceiptVerifyRead:
     """تحقق عام من سند عبر الـ QR. بلا رمز صحيح لا تُكشف أي بيانات (valid=false فقط)."""
@@ -442,6 +543,8 @@ def get_statement(student_id: int, session: SessionDep, current_user: CurrentUse
         receipts=receipts,
         totals=_totals(fees),
         financial_hold=hold,
+        hold_exempt=student.financial_hold_exempt,
+        hold_exempt_notes=student.financial_hold_notes,
     )
 
 
@@ -456,31 +559,19 @@ def _overdue_by_student(session: SessionDep, today: date):
     return grouped
 
 
-def _is_held(rows: list, today: date) -> bool:
-    if not settings.FINANCIAL_HOLD_ENABLED:
+def _is_held(rows: list, today: date, exempt: bool = False) -> bool:
+    if not settings.FINANCIAL_HOLD_ENABLED or exempt:
         return False
     cutoff = today - timedelta(days=settings.FINANCIAL_HOLD_GRACE_DAYS)
     amount = sum((installment_remaining(i) for i, _ in rows if i.due_date < cutoff), Decimal(0))
     return q(amount) > settings.FINANCIAL_HOLD_THRESHOLD_AMOUNT
 
 
-@router.get("/defaulters", response_model=list[DefaulterRead])
-def defaulters(
-    session: SessionDep,
-    current_user: CurrentUser,
-    classroom_id: int | None = Query(default=None),
-    min_overdue: Annotated[Decimal, Query(ge=0)] = Decimal("0"),
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-) -> list[DefaulterRead]:
-    _require_finance_staff(current_user)
-    today = date.today()
+def _defaulter_rows(session: SessionDep, today: date, classroom_id: int | None, min_overdue: Decimal) -> list[DefaulterRead]:
     grouped = _overdue_by_student(session, today)
     if not grouped:
         return []
-    students = {
-        s.id: s for s in session.exec(select(Student).where(Student.id.in_(list(grouped)))).all()
-    }
+    students = {s.id: s for s in session.exec(select(Student).where(Student.id.in_(list(grouped)))).all()}
     classrooms = {c.id: c.name for c in session.exec(select(ClassRoom)).all()}
     remaining_totals: dict[int, Decimal] = defaultdict(Decimal)
     for fee in session.exec(select(StudentFee).where(StudentFee.student_id.in_(list(grouped)))).all():
@@ -507,11 +598,50 @@ def defaulters(
                 oldest_due_date=oldest,
                 days_overdue=(today - oldest).days,
                 remaining_total=q(remaining_totals[sid]),
-                financial_hold=_is_held(items, today),
+                financial_hold=_is_held(items, today, student.financial_hold_exempt),
+                hold_exempt=student.financial_hold_exempt,
             )
         )
     rows.sort(key=lambda r: (-r.overdue_amount, r.student_name))
-    return rows[offset : offset + limit]
+    return rows
+
+
+@router.get("/defaulters", response_model=list[DefaulterRead])
+def defaulters(
+    session: SessionDep,
+    current_user: CurrentUser,
+    classroom_id: int | None = Query(default=None),
+    min_overdue: Annotated[Decimal, Query(ge=0)] = Decimal("0"),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[DefaulterRead]:
+    _require_finance_staff(current_user)
+    return _defaulter_rows(session, date.today(), classroom_id, min_overdue)[offset : offset + limit]
+
+
+@router.get("/defaulters/export")
+def export_defaulters(
+    session: SessionDep,
+    current_user: CurrentUser,
+    classroom_id: int | None = Query(default=None),
+    min_overdue: Annotated[Decimal, Query(ge=0)] = Decimal("0"),
+) -> StreamingResponse:
+    """تقرير المتأخرين بصيغة Excel عربية (RTL)."""
+    _require_finance_staff(current_user)
+    today = date.today()
+    rows = _defaulter_rows(session, today, classroom_id, min_overdue)
+    headers = ["الطالب", "الشعبة", "ولي الأمر", "هاتف ولي الأمر", "المبلغ المتأخر", "عدد الأقساط", "أقدم استحقاق", "أيام التأخر", "المتبقي الكلي", "حالة الحجب"]
+    data = [
+        [
+            r.student_name, r.classroom_name or "", r.guardian_name, r.guardian_phone, r.overdue_amount,
+            r.overdue_installments, r.oldest_due_date, r.days_overdue, r.remaining_total,
+            "مستثنى" if r.hold_exempt else ("محجوبة" if r.financial_hold else "—"),
+        ]
+        for r in rows
+    ]
+    total_row = ["الإجمالي", "", "", "", q(sum((r.overdue_amount for r in rows), Decimal(0))), sum(r.overdue_installments for r in rows), None, None, q(sum((r.remaining_total for r in rows), Decimal(0))), ""]
+    log_action(session, current_user, "export", "defaulters", None, f"تصدير تقرير المتأخرين ({len(rows)} طالب)")
+    return _xlsx_response(f"defaulters-{today.isoformat()}.xlsx", "المتأخرون", headers, data, total_row, money_cols={5, 9}, date_cols={7})
 
 
 @router.get("/summary", response_model=FinancialSummaryRead)
@@ -547,6 +677,9 @@ def summary(
     paid_total = q(sum((Decimal(f.paid_amount) for f in fees), Decimal(0)))
 
     grouped = _overdue_by_student(session, today)
+    exempt_ids = set(
+        session.exec(select(Student.id).where(Student.financial_hold_exempt == True)).all()  # noqa: E712
+    )
     overdue_amount = q(sum((installment_remaining(i) for items in grouped.values() for i, _ in items), Decimal(0)))
     return FinancialSummaryRead(
         as_of=today,
@@ -559,6 +692,36 @@ def summary(
         collection_rate=q(paid_total / net_total * 100) if net_total > 0 else Decimal("0.00"),
         overdue_amount=overdue_amount,
         overdue_students=len(grouped),
-        held_students=sum(1 for items in grouped.values() if _is_held(items, today)),
+        held_students=sum(
+            1
+            for sid, items in grouped.items()
+            if _is_held(items, today, sid in exempt_ids)
+        ),
         by_method_today=[MethodTotal(method=m, total=net(rows), count=len(rows)) for m, rows in by_method.items()],
     )
+
+
+# ---------------------------------------------------------------- استثناء الحجب المالي
+
+
+@router.put("/students/{student_id}/hold-exemption")
+def set_hold_exemption(
+    student_id: int, payload: HoldExemptionUpdate, session: SessionDep, current_user: CurrentUser
+) -> dict[str, object]:
+    """استثناء طالب من حجب الشهادة رغم المتأخرات. للمدير فقط (لا يكفي التفويض بإدارة المستخدمين)
+    ويُسجَّل السبب ومن قام به في سجل النشاطات."""
+    if current_user.role != UserRole.ADMIN:
+        raise _forbidden("استثناء الحجب المالي من صلاحيات المدير فقط")
+    student = session.get(Student, student_id)
+    if student is None:
+        raise _not_found("الطالب غير موجود")
+    student.financial_hold_exempt = payload.exempt
+    student.financial_hold_notes = payload.notes if payload.exempt else None
+    session.add(student)
+    session.commit()
+    log_action(
+        session, current_user, "update", "financial_hold_exemption", student.id,
+        f"{'تفعيل' if payload.exempt else 'إلغاء'} استثناء الحجب المالي للطالب {student.full_name}"
+        + (f": {payload.notes}" if payload.exempt else ""),
+    )
+    return {"student_id": student.id, "hold_exempt": student.financial_hold_exempt, "hold_exempt_notes": student.financial_hold_notes}

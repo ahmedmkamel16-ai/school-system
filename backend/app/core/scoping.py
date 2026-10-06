@@ -7,6 +7,15 @@ from app.models.user import User, UserRole
 
 def visible_classroom_ids(current_user: User, session: Session) -> set[int] | None:
     """None means no restriction (can see all classrooms)."""
+    if current_user.role == UserRole.PARENT:
+        # ولي الأمر يرى فقط شعب أبنائه (لا جداول ولا بيانات شعب غيرهم)
+        return {
+            cid
+            for cid in session.exec(
+                select(Student.classroom_id).where(Student.guardian_user_id == current_user.id)
+            ).all()
+            if cid is not None
+        }
     if current_user.role == UserRole.TEACHER and not current_user.can_manage_users:
         if current_user.teacher_id is None:
             return set()
