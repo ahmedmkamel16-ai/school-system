@@ -24,7 +24,14 @@ from decimal import Decimal
 from enum import Enum
 from typing import Annotated
 
-from pydantic import ConfigDict, StringConstraints, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BeforeValidator,
+    ConfigDict,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import CheckConstraint, DateTime, UniqueConstraint, func
 from sqlmodel import Field, Session, SQLModel, select
 
@@ -77,7 +84,24 @@ Score = Annotated[Decimal, Field(ge=0, le=1000, max_digits=6, decimal_places=2)]
 MaxScore = Annotated[Decimal, Field(gt=0, le=1000, max_digits=6, decimal_places=2)]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)]
 Note = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
-AcademicYear = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}[-/]\d{4}$")]
+def _normalize_year(v: object) -> object:
+    # "2025/2026" و"2025-2026" يُخزَّنان بصيغة واحدة حتى لا تتشتت المطابقة بين الامتحانات والكشوف
+    return v.strip().replace("/", "-") if isinstance(v, str) else v
+
+
+def _consecutive_years(v: str) -> str:
+    first, second = (int(x) for x in v.split("-"))
+    if second != first + 1:
+        raise ValueError("السنة الدراسية يجب أن تكون من سنتين متتاليتين مثل 2025-2026")
+    return v
+
+
+AcademicYear = Annotated[
+    str,
+    BeforeValidator(_normalize_year),
+    StringConstraints(pattern=r"^\d{4}-\d{4}$"),
+    AfterValidator(_consecutive_years),
+]
 
 
 def _utcnow() -> datetime:
@@ -106,6 +130,8 @@ class AuditMixin(SQLModel):
 class Exam(AuditMixin, table=True):
     """امتحان واحد لمادة واحدة في فصل واحد خلال فصل دراسي (Term) واحد."""
 
+    __tablename__ = "exams"
+
     __table_args__ = (
         CheckConstraint("max_score > 0 AND max_score <= 1000", name="ck_exam_max_score_range"),
         CheckConstraint("weight_percent > 0 AND weight_percent <= 100", name="ck_exam_weight_range"),
@@ -129,13 +155,15 @@ class Exam(AuditMixin, table=True):
 class ExamResult(AuditMixin, table=True):
     """درجة طالب واحد في امتحان واحد (صف واحد لكل طالب/امتحان)."""
 
+    __tablename__ = "exam_results"
+
     __table_args__ = (
         CheckConstraint("score IS NULL OR score >= 0", name="ck_result_score_non_negative"),
         UniqueConstraint("exam_id", "student_id", name="uq_result_exam_student"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    exam_id: uuid.UUID = Field(foreign_key="exam.id", index=True, ondelete="RESTRICT")
+    exam_id: uuid.UUID = Field(foreign_key="exams.id", index=True, ondelete="RESTRICT")
     student_id: int = Field(foreign_key="student.id", index=True, ondelete="RESTRICT")
     score: Decimal | None = Field(default=None, max_digits=6, decimal_places=2)
     status: ResultStatus = Field(default=ResultStatus.GRADED)
@@ -145,6 +173,8 @@ class ExamResult(AuditMixin, table=True):
 
 class ReportCard(AuditMixin, table=True):
     """كشف درجات طالب لفصل دراسي: لقطة (Snapshot) تُحسب من الخادم ولا يُدخلها العميل."""
+
+    __tablename__ = "report_cards"
 
     __table_args__ = (
         CheckConstraint(
@@ -167,13 +197,15 @@ class ReportCard(AuditMixin, table=True):
 class ReportCardEntry(AuditMixin, table=True):
     """سطر مادة واحدة داخل كشف الدرجات."""
 
+    __tablename__ = "report_card_entries"
+
     __table_args__ = (
         CheckConstraint("weighted_percentage >= 0 AND weighted_percentage <= 100", name="ck_entry_percentage_range"),
         UniqueConstraint("report_card_id", "subject_id", name="uq_entry_card_subject"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    report_card_id: uuid.UUID = Field(foreign_key="reportcard.id", index=True, ondelete="CASCADE")
+    report_card_id: uuid.UUID = Field(foreign_key="report_cards.id", index=True, ondelete="CASCADE")
     subject_id: int = Field(foreign_key="subject.id", index=True, ondelete="RESTRICT")
     weighted_percentage: Decimal = Field(max_digits=5, decimal_places=2)
 
@@ -251,6 +283,12 @@ class ResultBulkUpsert(_StrictInput):
         return v
 
 
+class ExamStatusChange(_StrictInput):
+    """نشر/إغلاق الامتحان (للمدير فقط): draft → published → locked، ولا رجوع."""
+
+    status: ExamStatus
+
+
 class ReportCardGenerate(_StrictInput):
     """طلب توليد كشوف لفصل دراسي؛ الأرقام تُحسب من الخادم ولا تُرسَل من العميل."""
 
@@ -305,12 +343,14 @@ class ResultRead(_Output):
 
 class ReportCardEntryRead(_Output):
     subject_id: int
+    subject_name: str | None = None
     weighted_percentage: Decimal
 
 
 class ReportCardRead(_Output):
     id: uuid.UUID
     student_id: int
+    student_name: str | None = None
     term: Term
     academic_year: str
     overall_percentage: Decimal | None
@@ -327,7 +367,7 @@ class ReportCardRead(_Output):
 # --- لولي الأمر: بلا created_by ولا internal_note ولا بيانات تدقيق ولا امتحانات غير منشورة ---
 
 
-class ExamGuardianRead(_Output):
+class GuardianExamRead(_Output):
     id: uuid.UUID
     title: str
     exam_type: ExamType
@@ -339,15 +379,16 @@ class ExamGuardianRead(_Output):
     subject_id: int
 
 
-class ResultGuardianRead(_Output):
+class GuardianResultRead(_Output):
     exam_id: uuid.UUID
     score: Decimal | None
     status: ResultStatus
     teacher_note: str | None
 
 
-class ReportCardGuardianRead(_Output):
+class GuardianReportCardRead(_Output):
     id: uuid.UUID
+    student_name: str | None = None
     term: Term
     academic_year: str
     overall_percentage: Decimal | None

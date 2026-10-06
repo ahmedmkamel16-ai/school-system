@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.endpoints import grades
 from app.core.config import settings
 from app.routers import (
     attendance,
@@ -39,6 +40,7 @@ app.include_router(timetable.router, prefix=settings.API_V1_PREFIX)
 app.include_router(curriculum.router, prefix=settings.API_V1_PREFIX)
 app.include_router(teacher_attendance.router, prefix=settings.API_V1_PREFIX)
 app.include_router(dashboard.router, prefix=settings.API_V1_PREFIX)
+app.include_router(grades.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")
