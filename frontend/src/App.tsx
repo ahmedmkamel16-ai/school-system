@@ -8,6 +8,10 @@ import { ClassesPage } from '@/pages/ClassesPage'
 import { UsersPage } from '@/pages/UsersPage'
 import { AuditLogPage } from '@/pages/AuditLogPage'
 import { GradesPage } from '@/pages/GradesPage'
+import { FinancialDashboard } from '@/pages/FinancialDashboard'
+import { MyFinancesPage } from '@/pages/MyFinancesPage'
+import { StatementPage } from '@/pages/StatementPage'
+import { VerifyReceiptPage } from '@/pages/VerifyReceiptPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { useAuth } from '@/lib/auth'
 
@@ -31,10 +35,23 @@ function RequireNotParent({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+function RequireFinance({ children }: { children: ReactNode }) {
+  const { isLoadingUser, isTeacher, canManageUsers, isParent, isAccountant } = useAuth()
+  if (isLoadingUser) return null
+  if (!(canManageUsers || isAccountant || isParent) || (isTeacher && !canManageUsers)) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
+function FinancialsHome() {
+  const { isParent } = useAuth()
+  return isParent ? <MyFinancesPage /> : <FinancialDashboard />
+}
+
 function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/verify-receipt" element={<VerifyReceiptPage />} />
       <Route
         element={
           <RequireAuth>
@@ -61,6 +78,22 @@ function App() {
           }
         />
         <Route path="/grades" element={<GradesPage />} />
+        <Route
+          path="/financials"
+          element={
+            <RequireFinance>
+              <FinancialsHome />
+            </RequireFinance>
+          }
+        />
+        <Route
+          path="/financials/students/:studentId"
+          element={
+            <RequireFinance>
+              <StatementPage />
+            </RequireFinance>
+          }
+        />
         <Route
           path="/users"
           element={

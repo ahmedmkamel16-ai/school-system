@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   ScrollText,
   ClipboardList,
+  Wallet,
   LogOut,
   Moon,
   Sun,
@@ -34,7 +35,7 @@ import { useAuth } from '@/lib/auth'
 import { CommandPalette, useCommandPaletteState } from '@/components/CommandPalette'
 
 export function AppLayout() {
-  const { user, logout, isParent, canManageUsers, isAdmin } = useAuth()
+  const { user, logout, isParent, canManageUsers, isAdmin, isAccountant } = useAuth()
   const { theme, setTheme } = useTheme()
   const commandPalette = useCommandPaletteState()
 
@@ -44,6 +45,9 @@ export function AppLayout() {
     ...(isParent ? [] : [{ to: '/teachers', label: 'المعلمون', icon: UserRound }]),
     ...(isParent ? [] : [{ to: '/classes', label: 'الشعب الدراسية', icon: School }]),
     { to: '/grades', label: isParent ? 'درجات أبنائي' : 'الدرجات', icon: ClipboardList },
+    ...(canManageUsers || isAccountant || isParent
+      ? [{ to: '/financials', label: isParent ? 'حسابات أبنائي' : 'الحسابات', icon: Wallet }]
+      : []),
     ...(canManageUsers
       ? [{ to: '/users', label: 'المستخدمون', icon: ShieldCheck }]
       : []),

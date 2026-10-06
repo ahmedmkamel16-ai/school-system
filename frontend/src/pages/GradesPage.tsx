@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { ClipboardList, FileText, Lock, Plus, Send } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, ClipboardList, FileText, Lock, Plus, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -59,6 +60,7 @@ import {
   EXAM_STATUS_LABELS,
   EXAM_TYPE_LABELS,
   TERM_LABELS,
+  apiErrorCode,
   apiErrorMessage,
   currentAcademicYear,
   formatNumber,
@@ -511,7 +513,19 @@ function ReportCardDialog({
           </DialogDescription>
         </DialogHeader>
         {isLoading && <Skeleton className="h-64 w-full" />}
-        {isError && (
+        {isError && apiErrorCode(error) === 'financial_hold' && (
+          <div className="no-print space-y-3 rounded-md border border-red-300 bg-red-50 p-4 text-center text-red-800" role="alert" data-testid="financial-hold">
+            <AlertTriangle className="mx-auto size-8" />
+            <p className="font-bold">{apiErrorMessage(error)}</p>
+            <p className="text-sm">الشهادة محجوبة مؤقتًا بسبب أقساط متأخرة.</p>
+            {student && (
+              <Button asChild variant="outline">
+                <Link to={`/financials/students/${student.id}`}>عرض كشف الحساب</Link>
+              </Button>
+            )}
+          </div>
+        )}
+        {isError && apiErrorCode(error) !== 'financial_hold' && (
           <p className="no-print rounded-md border p-4 text-center text-muted-foreground">
             {isParent
               ? 'لم يُنشر كشف الدرجات لهذا الفصل بعد.'

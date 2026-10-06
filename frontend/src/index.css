@@ -136,11 +136,16 @@
     padding: 0 !important;
     background: #fff !important;
   }
-  #root,
+  /* الشهادة/السند داخل حوار (Portal): نُخفي التطبيق كله */
+  body:has([data-slot='dialog-content'] .print-area) #root,
   [data-slot='dialog-overlay'],
   [data-slot='dialog-close'],
   [data-sonner-toaster],
   .no-print {
+    display: none !important;
+  }
+  /* منطقة طباعة داخل الصفحة نفسها (كشف الحساب): نُخفي كل ما لا يحتويها ولا هو داخلها */
+  body:not(:has([data-slot='dialog-content'] .print-area)) #root *:not(:has(.print-area)):not(.print-area):not(.print-area *) {
     display: none !important;
   }
   [data-slot='dialog-content'] {

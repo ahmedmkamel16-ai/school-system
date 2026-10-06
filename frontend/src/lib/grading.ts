@@ -82,10 +82,13 @@ export function formatNumber(value: number, digits = 2): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(digits).replace(/\.?0+$/, '')
 }
 
-/** يستخرج رسالة مقروءة من أخطاء FastAPI (نص، أو قائمة نصوص، أو أخطاء pydantic). */
+/** يستخرج رسالة مقروءة من أخطاء FastAPI (نص، كائن {code,message}، قائمة نصوص، أو أخطاء pydantic). */
 export function apiErrorMessage(error: unknown, fallback = 'حدث خطأ، حاول مرة أخرى'): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
   if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object' && !Array.isArray(detail) && 'message' in detail) {
+    return String((detail as { message: unknown }).message)
+  }
   if (Array.isArray(detail) && detail.length > 0) {
     const first = detail[0]
     if (typeof first === 'string') {
@@ -94,4 +97,13 @@ export function apiErrorMessage(error: unknown, fallback = 'حدث خطأ، حا
     if (first && typeof first === 'object' && 'msg' in first) return String((first as { msg: unknown }).msg)
   }
   return fallback
+}
+
+/** رمز الخطأ المنظَّم إن وُجد (مثل financial_hold). */
+export function apiErrorCode(error: unknown): string | null {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (detail && typeof detail === 'object' && !Array.isArray(detail) && 'code' in detail) {
+    return String((detail as { code: unknown }).code)
+  }
+  return null
 }
