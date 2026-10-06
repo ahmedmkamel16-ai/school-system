@@ -17,6 +17,7 @@ from sqlmodel import func, select
 
 from app.core.audit import log_action
 from app.core.deps import CurrentUser, SessionDep
+from app.core.finance import HOLD_MESSAGE, has_financial_hold
 from app.core.grading import can_manage_exam, is_admin, teacher_scope_pairs, upsert_report_card
 from app.core.scoping import visible_student_ids
 from app.models.classroom import ClassRoom
@@ -458,7 +459,9 @@ def get_guardian_report_card(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> GuardianReportCardRead:
-    """لولي الأمر: كشوف أبنائه المنشورة فقط. أي طالب آخر أو كشف غير منشور ⇒ 404 موحَّد."""
+    """لولي الأمر: كشوف أبنائه المنشورة فقط. أي طالب آخر أو كشف غير منشور ⇒ 404 موحَّد.
+
+    الحجب المالي: إذا تجاوزت أقساط الطالب المتأخرة الحد المضبوط ⇒ 403 برمز financial_hold."""
     if current_user.role != UserRole.PARENT:
         raise _forbidden("هذا المسار مخصص لأولياء الأمور")
     student = session.exec(
@@ -466,6 +469,12 @@ def get_guardian_report_card(
             Student.id == student_id, Student.guardian_user_id == current_user.id
         )
     ).first()
+    if student is not None and has_financial_hold(session, student.id):
+        # الحجب المالي: يأتي بعد التحقق من أن الطالب ابن المستخدم (لا نكشف حالة طلاب الآخرين)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "financial_hold", "message": HOLD_MESSAGE},
+        )
     card = None
     if student is not None:
         card = session.exec(

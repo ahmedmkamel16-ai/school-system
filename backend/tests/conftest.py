@@ -90,7 +90,7 @@ def world(session):
     w = W()
     w.__dict__.update(
         admin=headers(admin), ta=headers(teacher_a), tb=headers(teacher_b), acc=headers(accountant),
-        p1=headers(p1), p2=headers(p2), users=dict(admin=admin, ta=teacher_a, tb=teacher_b),
+        p1=headers(p1), p2=headers(p2), users=dict(admin=admin, ta=teacher_a, tb=teacher_b, acc=accountant, p1=p1, p2=p2),
         math=math, arabic=arabic, c1=c1, c2=c2, s1=s1, s2=s2, s3=s3,
     )
     return w

@@ -19,7 +19,7 @@
 """
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated
@@ -34,6 +34,8 @@ from pydantic import (
 )
 from sqlalchemy import CheckConstraint, DateTime, UniqueConstraint, func
 from sqlmodel import Field, Session, SQLModel, select
+
+from app.models.mixins import AuditMixin
 
 # ---------------------------------------------------------------------------
 # 1) الأنواع المساعدة
@@ -104,27 +106,9 @@ AcademicYear = Annotated[
 ]
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 # ---------------------------------------------------------------------------
 # 2) نماذج قاعدة البيانات (داخلية فقط)
 # ---------------------------------------------------------------------------
-
-
-class AuditMixin(SQLModel):
-    """حقول التدقيق المشتركة. تُملأ من الخادم فقط (المستخدم الحالي من JWT)."""
-
-    created_at: datetime = Field(default_factory=_utcnow, sa_type=DateTime(timezone=True), nullable=False)
-    updated_at: datetime = Field(
-        default_factory=_utcnow,
-        sa_type=DateTime(timezone=True),
-        sa_column_kwargs={"onupdate": _utcnow},
-        nullable=False,
-    )
-    created_by: int = Field(foreign_key="user.id", index=True, nullable=False)
-    updated_by: int | None = Field(default=None, foreign_key="user.id")
 
 
 class Exam(AuditMixin, table=True):

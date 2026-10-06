@@ -9,6 +9,7 @@ from app.routers import (
     classrooms,
     curriculum,
     dashboard,
+    financials,
     grades,
     students,
     subjects,
@@ -41,6 +42,7 @@ app.include_router(curriculum.router, prefix=settings.API_V1_PREFIX)
 app.include_router(teacher_attendance.router, prefix=settings.API_V1_PREFIX)
 app.include_router(dashboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(grades.router, prefix=settings.API_V1_PREFIX)
+app.include_router(financials.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")

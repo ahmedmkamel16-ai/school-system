@@ -8,6 +8,14 @@ from app.models.audit import AuditLog
 from app.models.subject import Subject
 from app.models.timetable import TimetableSlot
 from app.models.curriculum import CurriculumRequirement
+from app.models.financials import (
+    FeeStructure,
+    PaymentPlan,
+    PaymentReceipt,
+    ReceiptAllocation,
+    ReceiptCounter,
+    StudentFee,
+)
 from app.models.grades import Exam, ExamResult, ReportCard, ReportCardEntry
 
 __all__ = [
@@ -23,6 +31,12 @@ __all__ = [
     "Subject",
     "TimetableSlot",
     "CurriculumRequirement",
+    "FeeStructure",
+    "PaymentPlan",
+    "PaymentReceipt",
+    "ReceiptAllocation",
+    "ReceiptCounter",
+    "StudentFee",
     "Exam",
     "ExamResult",
     "ReportCard",
