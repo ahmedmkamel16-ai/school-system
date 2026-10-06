@@ -42,7 +42,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # % في كلمة المرور المرمَّزة تُفسَّر كاستيفاء في configparser، فنضاعفها
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+config.set_main_option("sqlalchemy.url", settings.migration_database_url.replace("%", "%%"))
 
 # add your model's MetaData object here
 # for 'autogenerate' support

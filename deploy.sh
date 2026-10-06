@@ -32,12 +32,21 @@ trap 'die "فشل السكربت عند السطر $LINENO — الخدمات ا
 command -v docker >/dev/null || die "Docker غير مثبّت"
 $COMPOSE version >/dev/null 2>&1 || die "docker compose (الإصدار 2) غير متاح"
 
+# قاعدة محلية اختيارية: COMPOSE_PROFILES=localdb. الافتراضي Supabase (خارجية).
+use_local_db() { [[ ",${COMPOSE_PROFILES:-}," == *",localdb,"* ]]; }
+
 check_env() {
     [ -f .env ] || die ".env غير موجود — انسخ .env.production.example إلى .env وعدّله"
     set -a; . ./.env; set +a
     [ -n "${DOMAIN:-}" ] && [ "$DOMAIN" != "school.example.com" ] || die "DOMAIN لم يُضبط في .env"
     [ -n "${SECRET_KEY:-}" ] && [ "${#SECRET_KEY}" -ge 32 ] && [[ "$SECRET_KEY" != CHANGE_ME* ]] || die "SECRET_KEY ضعيف/غير مضبوط (ولّده: openssl rand -hex 32)"
-    [ -n "${POSTGRES_PASSWORD:-}" ] && [[ "$POSTGRES_PASSWORD" != CHANGE_ME* ]] || die "POSTGRES_PASSWORD غير مضبوط"
+    [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL غير مضبوط (رابط Supabase) في .env"
+    case "$DATABASE_URL${MIGRATION_DATABASE_URL:-}" in
+        *YOUR_PROJECT_REF*|*ENCODED_PASSWORD*|*YOUR_REGION*|*CHANGE_ME*|*"[YOUR-PASSWORD]"*) die "DATABASE_URL يحوي قيمًا نموذجية — الصق رابط Supabase الحقيقي" ;;
+    esac
+    if use_local_db; then
+        [ -n "${POSTGRES_PASSWORD:-}" ] && [[ "$POSTGRES_PASSWORD" != CHANGE_ME* ]] || die "POSTGRES_PASSWORD غير مضبوط (مطلوب مع COMPOSE_PROFILES=localdb)"
+    fi
     if [ "$(stat -c '%a' .env 2>/dev/null || echo 600)" != "600" ]; then
         printf '\033[1;33m! صلاحيات .env مفتوحة؛ نضبطها 600\033[0m\n'; chmod 600 .env
     fi
@@ -127,10 +136,17 @@ deploy)
     # BUILD_PULL=0 يمنع جلب الصور الأساسية الأحدث (للخوادم بلا وصول لـ Docker Hub أو عند حدّ الطلبات)
     if [ "${BUILD_PULL:-1}" = 1 ]; then $COMPOSE build --pull backend frontend; else $COMPOSE build backend frontend; fi
 
-    log "قاعدة البيانات"
-    $COMPOSE up -d --wait db
-    if [ "$BACKUP" = 1 ] && $COMPOSE exec -T db psql -U "${POSTGRES_USER:-school}" -d "${POSTGRES_DB:-school_sis}" -tAc "SELECT to_regclass('public.alembic_version')" 2>/dev/null | grep -q alembic_version; then
-        log "نسخة احتياطية قبل الترحيل"; ./scripts/backup.sh
+    if use_local_db; then
+        log "قاعدة البيانات المحلية"
+        $COMPOSE up -d --wait db
+    fi
+
+    log "فحص الاتصال بقاعدة البيانات (SSL، المجمّع، الصلاحيات)"
+    $COMPOSE run --rm --no-deps -e RUN_MIGRATIONS=0 backend python scripts/check_db.py
+
+    if [ "$BACKUP" = 1 ]; then
+        log "نسخة احتياطية قبل الترحيل"
+        ./scripts/backup.sh
     fi
 
     log "الـ migrations (حاوية مؤقتة بالصورة الجديدة)"

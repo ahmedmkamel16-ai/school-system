@@ -1,6 +1,10 @@
 # نظام إدارة المدرسة — بيئة الإنتاج
 #   cp .env.production.example .env   # ثم عدّل القيم (انظر DEPLOYMENT.md)
 #   ./deploy.sh
+#
+# الخدمات الأساسية الثلاث: backend و frontend و nginx-proxy.
+# قاعدة البيانات: Supabase (خارجية) افتراضيًا عبر DATABASE_URL.
+# خدمة `db` المحلية اختيارية وتعمل فقط عند COMPOSE_PROFILES=localdb (للتجارب/بديل مستضاف ذاتيًا).
 name: school-sis
 
 x-logging: &default-logging
@@ -18,14 +22,15 @@ x-hardening: &hardening
   logging: *default-logging
 
 services:
-  # ------------------------------------------------------------ قاعدة البيانات
+  # ------------------------------------------------------------ قاعدة بيانات محلية (اختيارية: profile=localdb)
   db:
     <<: *hardening
+    profiles: ["localdb"]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-school_sis}
       POSTGRES_USER: ${POSTGRES_USER:-school}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD مطلوب في .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}   # مطلوبة فقط مع localdb (الصورة ترفض الإقلاع بدونها)
     volumes:
       - pgdata:/var/lib/postgresql/data
     cap_add:           # يحتاجها إقلاع PostgreSQL الرسمي لضبط ملكية مجلد البيانات
@@ -53,10 +58,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+        required: false      # لا يُنتظر ولا يُشترط إلا إذا فُعّل profile=localdb
     environment:
       ENVIRONMENT: production
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY مطلوب في .env}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-school}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-school_sis}
+      # رابط Supabase (Transaction pooler :6543 للتشغيل) — انظر .env.production.example
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL مطلوب في .env (رابط Supabase)}
+      # رابط الـ migrations (Session pooler/مباشر :5432). فارغ ⇒ يُستخدم DATABASE_URL
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-3}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-2}
       CORS_ORIGINS: '["https://${DOMAIN:?DOMAIN مطلوب في .env}"]'
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
       ALLOW_BOOTSTRAP_REGISTRATION: ${ALLOW_BOOTSTRAP_REGISTRATION:-false}
