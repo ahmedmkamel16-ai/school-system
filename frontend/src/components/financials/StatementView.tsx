@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { isStaffReceipt, type Statement } from '@/api/financials'
+import type { Statement, VoucherReceipt } from '@/api/financials'
 import {
   INSTALLMENT_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
@@ -21,7 +21,8 @@ import {
 import { TERM_LABELS, toNumber } from '@/lib/grading'
 import { PaymentModal } from './PaymentModal'
 import { ReceiptVoucherDialog } from './ReceiptVoucher'
-import type { Receipt } from '@/api/financials'
+import { useAuth } from '@/lib/auth'
+import { HoldExemptionDialog } from './HoldExemptionDialog'
 
 const STATUS_STYLE = {
   paid: 'bg-emerald-100 text-emerald-800',
@@ -40,7 +41,8 @@ export function StatementView({
   staff: boolean
 }) {
   const [paying, setPaying] = useState(false)
-  const [voucher, setVoucher] = useState<Receipt | null>(null)
+  const [voucher, setVoucher] = useState<VoucherReceipt | null>(null)
+  const { isAdmin } = useAuth()
   const totals = statement.totals
   const hasDebt = (toNumber(totals.remaining_total) ?? 0) > 0
 
@@ -56,6 +58,9 @@ export function StatementView({
             <Printer className="size-4" />
             طباعة الكشف
           </Button>
+          {staff && isAdmin && (
+            <HoldExemptionDialog studentId={studentId} exempt={Boolean(statement.hold_exempt)} notes={statement.hold_exempt_notes ?? null} />
+          )}
           {staff && hasDebt && (
             <Button onClick={() => setPaying(true)}>
               <Banknote className="size-4" />
@@ -65,6 +70,11 @@ export function StatementView({
         </div>
       </div>
 
+      {staff && statement.hold_exempt && (
+        <div className="no-print rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900" data-testid="hold-exempt-banner">
+          هذا الطالب مستثنى من الحجب المالي: {statement.hold_exempt_notes}
+        </div>
+      )}
       {statement.financial_hold && (
         <div className="no-print flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800" role="alert">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -163,13 +173,13 @@ export function StatementView({
                   <TableHead>النوع</TableHead>
                   <TableHead>الطريقة</TableHead>
                   <TableHead>المبلغ</TableHead>
-                  {staff && <TableHead className="no-print">إجراءات</TableHead>}
+                  <TableHead className="no-print">طباعة</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {statement.receipts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={staff ? 6 : 5} className="text-center text-muted-foreground">لا توجد سندات</TableCell>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">لا توجد سندات</TableCell>
                   </TableRow>
                 )}
                 {statement.receipts.map((r) => (
@@ -182,14 +192,12 @@ export function StatementView({
                     </TableCell>
                     <TableCell>{PAYMENT_METHOD_LABELS[r.method]}</TableCell>
                     <TableCell>{r.kind === 'reversal' ? '−' : ''}{formatMoney(r.amount)}</TableCell>
-                    {staff && isStaffReceipt(r) && (
-                      <TableCell className="no-print">
-                        <Button size="sm" variant="ghost" onClick={() => setVoucher(r)}>
-                          <ReceiptIcon className="size-4" />
-                          السند
-                        </Button>
-                      </TableCell>
-                    )}
+                    <TableCell className="no-print">
+                      <Button size="sm" variant="ghost" onClick={() => setVoucher({ ...r, student_name: r.student_name ?? statement.student_name })}>
+                        <ReceiptIcon className="size-4" />
+                        السند
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

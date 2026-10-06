@@ -10,6 +10,7 @@ import {
   ScrollText,
   ClipboardList,
   Wallet,
+  HeartHandshake,
   LogOut,
   Moon,
   Sun,
@@ -40,7 +41,9 @@ export function AppLayout() {
   const commandPalette = useCommandPaletteState()
 
   const navItems = [
-    { to: '/', label: 'لوحة التحكم', icon: LayoutDashboard },
+    ...(isParent
+      ? [{ to: '/guardian', label: 'متابعة أبنائي', icon: HeartHandshake }]
+      : [{ to: '/', label: 'لوحة التحكم', icon: LayoutDashboard }]),
     { to: '/students', label: isParent ? 'أبنائي' : 'الطلاب', icon: Users },
     ...(isParent ? [] : [{ to: '/teachers', label: 'المعلمون', icon: UserRound }]),
     ...(isParent ? [] : [{ to: '/classes', label: 'الشعب الدراسية', icon: School }]),

@@ -12,6 +12,7 @@ import { FinancialDashboard } from '@/pages/FinancialDashboard'
 import { MyFinancesPage } from '@/pages/MyFinancesPage'
 import { StatementPage } from '@/pages/StatementPage'
 import { VerifyReceiptPage } from '@/pages/VerifyReceiptPage'
+import { GuardianDashboard } from '@/pages/guardian/GuardianDashboard'
 import { LoginPage } from '@/pages/LoginPage'
 import { useAuth } from '@/lib/auth'
 
@@ -42,6 +43,20 @@ function RequireFinance({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+function RequireParent({ children }: { children: ReactNode }) {
+  const { isParent, isLoadingUser } = useAuth()
+  if (isLoadingUser) return null
+  if (!isParent) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
+/** ولي الأمر يهبط على صفحته المتكاملة؛ بقية الأدوار على لوحة التحكم. */
+function Home() {
+  const { isParent, isLoadingUser } = useAuth()
+  if (isLoadingUser) return null
+  return isParent ? <Navigate to="/guardian" replace /> : <DashboardPage />
+}
+
 function FinancialsHome() {
   const { isParent } = useAuth()
   return isParent ? <MyFinancesPage /> : <FinancialDashboard />
@@ -59,7 +74,15 @@ function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route index element={<Home />} />
+        <Route
+          path="/guardian"
+          element={
+            <RequireParent>
+              <GuardianDashboard />
+            </RequireParent>
+          }
+        />
         <Route path="/students" element={<StudentsPage />} />
         <Route
           path="/teachers"

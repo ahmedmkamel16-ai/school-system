@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { AlertTriangle, ClipboardList, FileText, Lock, Plus, Send } from 'lucide-react'
+import { ClipboardList, FileText, Lock, Plus, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -48,19 +47,16 @@ import {
   useExam,
   useExamAssignments,
   useExams,
-  usePublishReportCard,
-  useReportCard,
   type Exam,
   type ExamFilters,
 } from '@/api/grades'
 import { ExamFormDialog } from '@/components/grades/ExamFormDialog'
 import { GradebookGrid } from '@/components/grades/GradebookGrid'
-import { ReportCardView } from '@/components/grades/ReportCardView'
+import { ReportCardDialog } from '@/components/grades/ReportCardDialog'
 import {
   EXAM_STATUS_LABELS,
   EXAM_TYPE_LABELS,
   TERM_LABELS,
-  apiErrorCode,
   apiErrorMessage,
   currentAcademicYear,
   formatNumber,
@@ -475,77 +471,5 @@ function ReportCardsSection() {
         onClose={() => setStudent(null)}
       />
     </>
-  )
-}
-
-function ReportCardDialog({
-  student,
-  term,
-  academicYear,
-  onClose,
-}: {
-  student: Student | null
-  term: Term
-  academicYear: string
-  onClose: () => void
-}) {
-  const { isParent, canManageUsers } = useAuth()
-  const query = { studentId: student?.id ?? null, term, academicYear }
-  const { data: card, isLoading, isError, error } = useReportCard(query, isParent)
-  const publish = usePublishReportCard()
-
-  const onPublish = async () => {
-    try {
-      await publish.mutateAsync(query)
-      toast.success('تم نشر الكشف لولي الأمر')
-    } catch (e) {
-      toast.error(apiErrorMessage(e))
-    }
-  }
-
-  return (
-    <Dialog open={student !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-        <DialogHeader className="no-print">
-          <DialogTitle>كشف درجات {student?.full_name}</DialogTitle>
-          <DialogDescription>
-            {TERM_LABELS[term]} — <bdi dir="ltr">{academicYear}</bdi>
-          </DialogDescription>
-        </DialogHeader>
-        {isLoading && <Skeleton className="h-64 w-full" />}
-        {isError && apiErrorCode(error) === 'financial_hold' && (
-          <div className="no-print space-y-3 rounded-md border border-red-300 bg-red-50 p-4 text-center text-red-800" role="alert" data-testid="financial-hold">
-            <AlertTriangle className="mx-auto size-8" />
-            <p className="font-bold">{apiErrorMessage(error)}</p>
-            <p className="text-sm">الشهادة محجوبة مؤقتًا بسبب أقساط متأخرة.</p>
-            {student && (
-              <Button asChild variant="outline">
-                <Link to={`/financials/students/${student.id}`}>عرض كشف الحساب</Link>
-              </Button>
-            )}
-          </div>
-        )}
-        {isError && apiErrorCode(error) !== 'financial_hold' && (
-          <p className="no-print rounded-md border p-4 text-center text-muted-foreground">
-            {isParent
-              ? 'لم يُنشر كشف الدرجات لهذا الفصل بعد.'
-              : apiErrorMessage(error, 'تعذّر تحميل الكشف')}
-          </p>
-        )}
-        {card && (
-          <>
-            <ReportCardView card={card} />
-            {canManageUsers && (
-              <div className="no-print flex justify-end">
-                <Button onClick={onPublish} disabled={publish.isPending}>
-                  <Send className="size-4" />
-                  {card.status === 'published' ? 'تحديث الكشف المنشور' : 'نشر الكشف لولي الأمر'}
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
   )
 }

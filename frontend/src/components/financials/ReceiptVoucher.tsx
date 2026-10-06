@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import type { Receipt } from '@/api/financials'
+import type { VoucherReceipt } from '@/api/financials'
 import { PAYMENT_METHOD_LABELS, RECEIPT_KIND_LABELS, formatMoney, verifyUrl } from '@/lib/finance'
 
 type Paper = 'A5' | 'A4'
@@ -41,7 +41,7 @@ function Qr({ value }: { value: string }) {
  * سند القبض الجاهز للطباعة (A5 أو A4) مع QR اختياري. الورقة فاتحة دائمًا،
  * وقواعد الطباعة العامة (.print-area / .no-print) في index.css؛ مقاس الصفحة يُضبط هنا.
  */
-export function ReceiptVoucherPanel({ receipt, schoolName = 'نظام إدارة المدرسة' }: { receipt: Receipt; schoolName?: string }) {
+export function ReceiptVoucherPanel({ receipt, schoolName = 'نظام إدارة المدرسة' }: { receipt: VoucherReceipt; schoolName?: string }) {
   const [paper, setPaper] = useState<Paper>('A5')
   const [withQr, setWithQr] = useState(true)
   const reversal = receipt.kind === 'reversal'
@@ -100,10 +100,10 @@ export function ReceiptVoucherPanel({ receipt, schoolName = 'نظام إدارة
             {PAYMENT_METHOD_LABELS[receipt.method]}
             {receipt.reference && <span className="mr-2 font-mono text-xs text-neutral-600" dir="ltr">({receipt.reference})</span>}
           </dd>
-          {receipt.allocations.length > 0 && (
+          {(receipt.allocations?.length ?? 0) > 0 && (
             <>
               <dt className="text-neutral-500">الأقساط المسددة</dt>
-              <dd>{receipt.allocations.map((a) => `القسط ${a.installment_no}`).join('، ')}</dd>
+              <dd>{receipt.allocations?.map((a) => `القسط ${a.installment_no}`).join('، ')}</dd>
             </>
           )}
           {reversal && (
@@ -118,14 +118,24 @@ export function ReceiptVoucherPanel({ receipt, schoolName = 'نظام إدارة
               <dd>{receipt.note}</dd>
             </>
           )}
-          <dt className="text-neutral-500">المحصِّل</dt>
-          <dd>{receipt.collected_by_name ?? '—'}</dd>
+          {receipt.collected_by_name && (
+            <>
+              <dt className="text-neutral-500">المحصِّل</dt>
+              <dd>{receipt.collected_by_name}</dd>
+            </>
+          )}
         </dl>
 
         <div className={`flex items-center justify-between rounded-md border-2 p-3 ${reversal ? 'border-red-700 text-red-700' : 'border-neutral-800'}`}>
           <span className="text-sm">{reversal ? 'المبلغ المعكوس' : 'المبلغ المستلم'}</span>
           <span className="text-2xl font-bold" data-testid="receipt-amount">{formatMoney(receipt.amount)}</span>
         </div>
+        {receipt.amount_in_words && (
+          <p className="mt-2 text-sm" data-testid="receipt-words">
+            <span className="text-neutral-500">المبلغ كتابةً: </span>
+            <b>{receipt.amount_in_words}</b>
+          </p>
+        )}
         {receipt.is_reversed && (
           <p className="mt-2 text-center text-sm font-bold text-red-700">هذا السند معكوس (ملغى) بسند عكس لاحق</p>
         )}
@@ -147,7 +157,7 @@ export function ReceiptVoucherPanel({ receipt, schoolName = 'نظام إدارة
   )
 }
 
-export function ReceiptVoucherDialog({ receipt, onClose }: { receipt: Receipt | null; onClose: () => void }) {
+export function ReceiptVoucherDialog({ receipt, onClose }: { receipt: VoucherReceipt | null; onClose: () => void }) {
   return (
     <Dialog open={receipt !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">

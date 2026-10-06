@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Banknote, FilePlus2, Layers, MessageCircle, Printer, Undo2 } from 'lucide-react'
+import { Banknote, Download, FilePlus2, Layers, MessageCircle, Printer, Undo2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -15,13 +16,22 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useAuth } from '@/lib/auth'
-import { useDefaulters, useFinancialSummary, useReceipts, type Receipt } from '@/api/financials'
+import { downloadFile, useDefaulters, useFinancialSummary, useReceipts, type Receipt } from '@/api/financials'
 import { PAYMENT_METHOD_LABELS, RECEIPT_KIND_LABELS, formatMoney, todayIso } from '@/lib/finance'
 import { toNumber } from '@/lib/grading'
 import { PaymentModal } from '@/components/financials/PaymentModal'
 import { ReceiptVoucherDialog } from '@/components/financials/ReceiptVoucher'
 import { ReverseReceiptDialog } from '@/components/financials/ReverseReceiptDialog'
 import { FeeStructureDialog, PlanDialog } from '@/components/financials/FeeSetupDialogs'
+
+async function exportFile(path: string, params: Record<string, string>, filename: string) {
+  try {
+    await downloadFile(path, params, filename)
+    toast.success('تم تنزيل الملف')
+  } catch {
+    toast.error('تعذّر تصدير الملف')
+  }
+}
 
 /** الصفحة الرئيسية للمحاسب: مقبوضات اليوم، المتأخرات، وإحصائيات تحصيل الرسوم. */
 export function FinancialDashboard() {
@@ -93,7 +103,16 @@ export function FinancialDashboard() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold">المقبوضات</h2>
-          <Input type="date" className="w-44" max={todayIso()} value={date} onChange={(e) => setDate(e.target.value || todayIso())} aria-label="تاريخ المقبوضات" />
+          <div className="flex items-center gap-2">
+            <Input type="date" className="w-44" max={todayIso()} value={date} onChange={(e) => setDate(e.target.value || todayIso())} aria-label="تاريخ المقبوضات" />
+            <Button
+              variant="outline"
+              onClick={() => exportFile('/financials/receipts/export', { date_from: date, date_to: date }, `receipts-${date}.xlsx`)}
+            >
+              <Download className="size-4" />
+              تصدير Excel
+            </Button>
+          </div>
         </div>
         <div className="rounded-lg border">
           <Table>
@@ -144,7 +163,13 @@ export function FinancialDashboard() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-bold">المتأخرون عن الدفع</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold">المتأخرون عن الدفع</h2>
+          <Button variant="outline" onClick={() => exportFile('/financials/defaulters/export', {}, `defaulters-${todayIso()}.xlsx`)}>
+            <Download className="size-4" />
+            تصدير Excel
+          </Button>
+        </div>
         <div className="rounded-lg border">
           <Table>
             <TableHeader>
@@ -178,7 +203,7 @@ export function FinancialDashboard() {
                     <p className="text-xs">{d.overdue_installments} قسط</p>
                   </TableCell>
                   <TableCell>{d.oldest_due_date}<p className="text-xs text-muted-foreground">منذ {d.days_overdue} يوم</p></TableCell>
-                  <TableCell>{d.financial_hold ? <Badge variant="destructive">شهادة محجوبة</Badge> : <Badge variant="outline">—</Badge>}</TableCell>
+                  <TableCell>{d.hold_exempt ? <Badge variant="secondary">مستثنى</Badge> : d.financial_hold ? <Badge variant="destructive">شهادة محجوبة</Badge> : <Badge variant="outline">—</Badge>}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Button size="sm" variant="outline" asChild>

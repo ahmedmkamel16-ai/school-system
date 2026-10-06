@@ -60,6 +60,7 @@ export interface Receipt {
   student_name: string | null
   fee_name: string | null
   amount: string
+  amount_in_words: string
   method: PaymentMethod
   reference: string | null
   paid_at: string
@@ -74,13 +75,36 @@ export interface Receipt {
 }
 
 export interface GuardianReceipt {
+  id: string
   receipt_number: string
   kind: ReceiptKind
+  student_name: string | null
   amount: string
+  amount_in_words: string
   method: PaymentMethod
   paid_at: string
   is_reversed: boolean
   fee_name: string | null
+  verification_code: string
+}
+
+/** ما يحتاجه سند القبض للطباعة؛ نسخة الطاقم كاملة، ونسخة ولي الأمر بلا المحصِّل/المرجع/الملاحظات. */
+export interface VoucherReceipt {
+  receipt_number: string
+  kind: ReceiptKind
+  student_name: string | null
+  fee_name: string | null
+  amount: string
+  amount_in_words: string
+  method: PaymentMethod
+  paid_at: string
+  verification_code: string
+  is_reversed: boolean
+  reference?: string | null
+  note?: string | null
+  reversal_reason?: string | null
+  collected_by_name?: string | null
+  allocations?: { installment_no: number | null }[]
 }
 
 export interface StatementTotals {
@@ -100,6 +124,9 @@ export interface Statement {
   totals: StatementTotals
   financial_hold: boolean
   hold_message?: string | null
+  // للطاقم فقط:
+  hold_exempt?: boolean
+  hold_exempt_notes?: string | null
 }
 
 export interface Defaulter {
@@ -114,6 +141,7 @@ export interface Defaulter {
   days_overdue: number
   remaining_total: string
   financial_hold: boolean
+  hold_exempt: boolean
 }
 
 export interface FinancialSummary {
@@ -234,4 +262,37 @@ export const useReverseReceipt = () =>
 export async function verifyReceipt(number: string, code: string) {
   const { data } = await apiClient.get<ReceiptVerification>('/financials/receipts/verify', { params: { number, code } })
   return data
+}
+
+export const useSetHoldExemption = () =>
+  useFinanceMutation(
+    async ({ studentId, exempt, notes }: { studentId: number; exempt: boolean; notes: string | null }) =>
+      (await apiClient.put(`/financials/students/${studentId}/hold-exemption`, { exempt, notes })).data,
+  )
+
+export interface GuardianReportCardList {
+  financial_hold: boolean
+  hold_message: string | null
+  cards: { term: Term; academic_year: string; published_at: string | null }[]
+}
+
+export function useGuardianReportCards(studentId: number | null) {
+  return useQuery({
+    queryKey: ['report-card', 'guardian-list', studentId],
+    queryFn: async () => (await apiClient.get<GuardianReportCardList>(`/guardian/students/${studentId}/report-cards`)).data,
+    enabled: studentId !== null,
+  })
+}
+
+/** يُنزّل ملفًا من الـ API (مثل Excel) مع إرسال رمز الدخول، ثم يحفظه عبر رابط مؤقت. */
+export async function downloadFile(path: string, params: Record<string, string | number | undefined>, filename: string) {
+  const { data } = await apiClient.get<Blob>(path, { params, responseType: 'blob' })
+  const url = URL.createObjectURL(data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
