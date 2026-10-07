@@ -1,0 +1,10 @@
+# فرض نهايات أسطر LF في كل الملفات (ويندوز يحوّلها CRLF فيكسر سكربتات Docker و Nginx)
+* text=auto eol=lf
+*.sh text eol=lf
+*.conf text eol=lf
+*.template text eol=lf
+Dockerfile text eol=lf
+*.png binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
